@@ -1,0 +1,105 @@
+---
+title: "Introducción"
+description: "Qué es Consultoría Online y cómo funciona la plataforma de evaluación de digitalización."
+---
+
+**Consultoría Online** es una aplicación SaaS desarrollada en ASP.NET Web Forms (C# / .NET 4.7.2) por **Vegalia TI / Consultoria de Datos**. Guía a usuarios empresariales a través de un cuestionario personalizado de evaluación de digitalización y genera un informe en formato Word con los resultados.
+
+<Note>
+  Toda la interfaz de usuario, los textos del cuestionario y los mensajes de correo electrónico están en **español**. La plataforma está orientada a pymes hispanohablantes.
+</Note>
+
+## ¿Qué hace la plataforma?
+
+El flujo principal tiene tres etapas:
+
+1. **Registro** — el usuario proporciona su dirección de correo electrónico y acepta la política de privacidad. Se crea un registro en la base de datos y se envía un correo de confirmación.
+2. **Cuestionario** — se presentan preguntas una a una, con barra de progreso, navegación hacia atrás y guardado automático de cada respuesta.
+3. **Finalización** — al completar el cuestionario se envían los correos de cierre, se actualiza el perfil del usuario y se genera el informe Word.
+
+El estudio se anuncia como **gratuito y de aproximadamente 3 minutos**, sin necesidad de instalar ningún software adicional.
+
+## Modelos de cuestionario
+
+La plataforma soporta múltiples **modelos de cuestionario** (`ModeloCuestionario`). El modelo se asigna en el momento del registro (actualmente el modelo por defecto es el `9`). Cada modelo agrupa sus preguntas en **apartados** (`ApartadoPreguntas`) y define las respuestas posibles para cada pregunta.
+
+## Tipos de respuesta
+
+Cada pregunta declara su tipo de respuesta mediante el enum `TipoRespuesta` definido en `Formulario.aspx.cs`:
+
+| Valor | Nombre | Descripción |
+|-------|--------|-------------|
+| `1` | `text` | Campo de texto libre de una línea |
+| `2` | `num` | Campo numérico (entero) |
+| `3` | `radio` | Selección única (botones de opción) |
+| `4` | `check` | Selección múltiple (casillas de verificación) |
+| `5` | `memo` | Área de texto multilínea para comentarios |
+
+Las respuestas de tipo `radio` y `check` pueden incluir un campo de texto libre adicional (`TieneTexto`), y determinadas opciones pueden habilitar **repreguntas** condicionales (`PermiteRepregunta`).
+
+## Tipos de correo electrónico
+
+El enum `MailType` define los tres mensajes automatizados que envía la plataforma:
+
+| Valor | Evento | Destinatario |
+|-------|--------|--------------|
+| `register` | Alta del usuario | Usuario registrado |
+| `finalized` | Cuestionario completado | Usuario registrado |
+| `results` | Resultados disponibles | Equipo interno (Vegalia TI) |
+
+Los correos se envían de forma asíncrona mediante `SmtpClient` y se componen a partir de plantillas HTML en la carpeta `~/mails/`.
+
+## Gestión del estado de sesión
+
+El estado del usuario entre peticiones se mantiene con `MySession.Current`, un objeto singleton almacenado en la sesión ASP.NET:
+
+```csharp MySession.cs
+public static MySession Current
+{
+    get
+    {
+        MySession session =
+          (MySession)HttpContext.Current.Session["__MySession__"];
+        if (session == null)
+        {
+            session = new MySession();
+            HttpContext.Current.Session["__MySession__"] = session;
+        }
+        return session;
+    }
+}
+```
+
+Las propiedades más relevantes de la sesión son:
+
+| Propiedad | Tipo | Descripción |
+|-----------|------|-------------|
+| `IdUsuario` | `int` | Identificador del usuario registrado (0 = no registrado) |
+| `Email` | `string` | Correo electrónico del usuario |
+| `IdModeloCuestionario` | `int` | Modelo de cuestionario asignado |
+| `TotalPreguntas` | `int` | Número total de preguntas del modelo |
+| `Preguntas` | `List<Pregunta>` | Lista completa de preguntas cargadas al inicio |
+| `Respuestas` | `List<RespuestaPosible>` | Respuestas posibles cargadas al inicio |
+| `LogFile` | `string` | Ruta al archivo de log de la sesión |
+
+## Entidades principales
+
+El modelo de datos se organiza en torno a las siguientes entidades:
+
+| Entidad | Descripción |
+|---------|-------------|
+| `ModeloCuestionario` | Define un cuestionario completo |
+| `ApartadoPreguntas` | Agrupación temática de preguntas dentro de un modelo |
+| `Pregunta` | Pregunta individual con tipo de respuesta y metadatos |
+| `RespuestaPosible` | Opción de respuesta asociada a una pregunta |
+| `RespuestaDelUsuario` | Respuesta concreta que registra un usuario |
+| `Usuario` | Registro del participante (email, nombre, teléfono, actividad) |
+
+<Columns cols={2}>
+  <Card title="Inicio rápido" icon="rocket" href="/quickstart">
+    Despliega y configura Consultoría Online en tu entorno IIS.
+  </Card>
+  <Card title="Arquitectura" icon="sitemap" href="/architecture">
+    Estructura del proyecto, capas de datos y flujo de la aplicación.
+  </Card>
+</Columns>

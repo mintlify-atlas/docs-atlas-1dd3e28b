@@ -1,0 +1,77 @@
+---
+title: "DALPregunta"
+description: "Acceso a datos para la tabla Pregunta."
+---
+
+`DALPregunta` es la clase de acceso a datos responsable de cargar las preguntas del cuestionario desde SQL Server. Se encuentra en `DAL/DALPregunta.cs`.
+
+## Constructor
+
+Al instanciarse, crea un objeto `DbConnect` que abre la conexión con SQL Server usando la cadena de conexión estática `DbConnect.SqlConnString`.
+
+```csharp csharp
+public DALPregunta()
+{
+    MainCnx = new DbConnect();
+}
+```
+
+<Note>
+`DbConnect` abre la conexión en su propio constructor. Si la conexión falla, la excepción se silencia y `MainCnx.Db` queda como `null`.
+</Note>
+
+## Métodos
+
+### ObtenerPreguntas
+
+Devuelve todas las preguntas visibles de un modelo de cuestionario, ordenadas por su posición de aparición.
+
+<ParamField path="idModeloCuestionario" type="int" required>
+  Identificador del modelo de cuestionario (`ModeloCuestionario.IdModeloCuestionario`). Filtra las preguntas a través de su sección (`ApartadoPreguntas`).
+</ParamField>
+
+**Devuelve:** `List<Pregunta>`, o `null` si se produce una excepción.
+
+#### SQL ejecutado
+
+```sql sql
+SELECT p.*, a.NomApartado
+FROM Pregunta p
+INNER JOIN ApartadoPreguntas a
+    ON a.IdApartadoPreguntas = p.RIdApartadoPreguntas1
+WHERE a.RIdModeloCuestionario1 = {idModeloCuestionario}
+  AND p.NoMostrar = 0
+ORDER BY OrdenAparicion
+```
+
+<Warning>
+La consulta construye la cláusula `WHERE` con `String.Format`, interpolando directamente `idModeloCuestionario`. El valor procede de `MySession.Current.IdModeloCuestionario`, que se asigna internamente en el servidor; no es un valor introducido por el usuario. Aun así, se recomienda migrar a consultas parametrizadas.
+</Warning>
+
+#### Mapeo de columnas
+
+Cada fila del `SqlDataReader` se convierte en un objeto `Pregunta`. Los campos que pueden ser nulos en base de datos se gestionan con `utils.GestionarNulos()`, que convierte `DBNull` en `null`.
+
+| Columna DB | Propiedad C# | Tipo .NET | Nullable |
+|---|---|---|---|
+| `IdPregunta` | `IdPregunta` | `int` | No |
+| `TextoPregunta` | `TextoPregunta` | `string` | No |
+| `RIdPregunta1` | `RidPregunta1` | `int?` | Sí |
+| `RIdTipoRespuesta1` | `RidTipoRespuesta1` | `int` | No |
+| `OrdenAparicion` | `OrdenAparicion` | `Int16?` | Sí |
+| `RIdApartadoPreguntas1` | `RidApartadoPreguntas1` | `int?` | Sí |
+| `NoMostrar` | `NoMostrar` | `bool` | No |
+| `TextoDeAyuda` | `TextoDeAyuda` | `string` | Sí |
+| `EsOpcional` | `EsOpcional` | `bool` | No |
+| `NomApartado` | `NombreApartado` | `string` | Sí |
+
+#### Ejemplo de uso
+
+```csharp csharp
+List<Pregunta> pregs = new DALPregunta()
+    .ObtenerPreguntas(MySession.Current.IdModeloCuestionario);
+MySession.Current.Preguntas = pregs;
+MySession.Current.TotalPreguntas = pregs.Count;
+```
+
+Este bloque se ejecuta en `butEmpezar_Click` (`Formulario.aspx.cs`) al iniciar el cuestionario.

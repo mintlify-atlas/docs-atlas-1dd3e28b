@@ -1,97 +1,65 @@
 ---
-title: "Introduction"
-description: "Welcome to the new home for your documentation"
+title: "Consultoría Online"
+description: "Plataforma de evaluación de digitalización personalizada para empresas. Guía a los usuarios a través de un cuestionario inteligente y genera informes Word a medida."
 ---
 
-## Setting up
-
-Get your documentation site up and running in minutes.
-
-<Card
-  title="Start here"
-  icon="rocket"
-  href="/quickstart"
-  horizontal
->
-  Follow our three step quickstart guide.
-</Card>
-
-## Make it yours
-
-Design a docs site that looks great and empowers your users.
-
-<Columns cols={2}>
-  <Card
-    title="Edit locally"
-    icon="pen-to-square"
-    href="/development"
-  >
-    Edit your docs locally and preview them in real time.
+<CardGroup cols={2}>
+  <Card title="Inicio rápido" icon="rocket" href="/quickstart">
+    Pon en marcha la aplicación en minutos: configura la base de datos, SMTP y despliega en IIS.
   </Card>
-  <Card
-    title="Customize your site"
-    icon="palette"
-    href="/essentials/settings"
-  >
-    Customize the design and colors of your site to match your brand.
+  <Card title="Registro de usuarios" icon="user-plus" href="/features/user-registration">
+    Flujo de registro por email con aceptación de política de privacidad.
   </Card>
-    <Card
-    title="Set up navigation"
-    icon="map"
-    href="/essentials/navigation"
-  >
-    Organize your docs to help users find what they need and succeed with your product.
+  <Card title="Cuestionario adaptativo" icon="list-check" href="/features/questionnaire">
+    Preguntas secuenciales con repreguntas condicionales y barra de progreso.
   </Card>
-  <Card
-    title="API documentation"
-    icon="terminal"
-    href="/api-reference/introduction"
-  >
-    Auto-generate API documentation from OpenAPI specifications.
+  <Card title="Generación de informes" icon="file-word" href="/features/report-generation">
+    Generación automática de documentos DOCX personalizados por usuario.
   </Card>
-</Columns>
+</CardGroup>
 
-## Create beautiful pages
+## Qué es Consultoría Online
 
-Everything you need to create world-class documentation.
+Consultoría Online es una aplicación web ASP.NET (Web Forms / C# / .NET 4.7.2) desarrollada para **Vegalia TI — Consultoria de Datos**. Permite a las empresas completar un estudio de digitalización personalizado de forma gratuita en tan solo 3 minutos.
 
-<Columns cols={2}>
-  <Card
-    title="Write with MDX"
-    icon="pen-fancy"
-    href="/essentials/markdown"
-  >
-    Use MDX to style your docs pages.
-  </Card>
-  <Card
-    title="Code samples"
-    icon="code"
-    href="/essentials/code"
-  >
-    Add sample code to demonstrate how to use your product.
-  </Card>
-  <Card
-    title="Images"
-    icon="image"
-    href="/essentials/images"
-  >
-    Display images and other media.
-  </Card>
-  <Card
-    title="Reusable snippets"
-    icon="recycle"
-    href="/essentials/reusable-snippets"
-  >
-    Write once and reuse across your docs.
-  </Card>
-</Columns>
+La plataforma:
 
-## Need inspiration?
+- Registra al usuario con su correo electrónico
+- Le presenta un cuestionario adaptativo sobre el estado de digitalización de su negocio
+- Persiste todas las respuestas en SQL Server
+- Genera un informe Word (DOCX) personalizado al finalizar
+- Envía notificaciones por email en cada etapa del proceso
 
-<Card
-  title="See complete examples"
-  icon="stars"
-  href="https://mintlify.com/customers"
->
-  Browse our showcase of exceptional documentation sites.
-</Card>
+## Flujo principal
+
+<Steps>
+  <Step title="Registro">
+    El usuario introduce su email y acepta la política de privacidad. El sistema crea un nuevo registro en la tabla `Usuario` y envía un email de confirmación.
+  </Step>
+  <Step title="Inicio del cuestionario">
+    Al pulsar **Empezar**, la aplicación carga todas las preguntas y respuestas posibles del modelo de cuestionario configurado desde la base de datos.
+  </Step>
+  <Step title="Respuesta pregunta a pregunta">
+    El usuario avanza pregunta a pregunta. Cada respuesta se guarda en `RespuestaDelUsuario`. Las repreguntas condicionales se muestran u ocultan según la selección del usuario.
+  </Step>
+  <Step title="Finalización e informe">
+    Al completar el cuestionario, el sistema genera un documento DOCX con los resultados, actualiza el perfil del usuario y envía los emails de finalización al usuario y al equipo interno.
+  </Step>
+</Steps>
+
+## Características principales
+
+<CardGroup cols={2}>
+  <Card title="Tipos de respuesta" icon="sliders" href="/features/answer-types">
+    Radio, checkbox, texto libre, numérico y memo — cinco tipos de respuesta configurables por pregunta.
+  </Card>
+  <Card title="Notificaciones email" icon="envelope" href="/features/email-notifications">
+    Emails de registro, finalización y resultados con plantillas HTML personalizables.
+  </Card>
+  <Card title="Arquitectura" icon="diagram-project" href="/architecture/overview">
+    ASP.NET Web Forms con patrón DAL, sesión HTTP y SQL Server como backend.
+  </Card>
+  <Card title="Despliegue" icon="server" href="/deployment/prerequisites">
+    Requisitos, configuración de IIS, base de datos y SMTP explicados paso a paso.
+  </Card>
+</CardGroup>

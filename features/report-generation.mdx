@@ -1,0 +1,133 @@
+---
+title: "Generación de informes"
+description: "Cómo se genera el documento Word (DOCX) personalizado al finalizar el cuestionario."
+---
+
+Al finalizar el cuestionario, la plataforma puede generar un informe Word (DOCX) personalizado con los resultados del diagnóstico de digitalización del usuario. El informe se adjunta al correo de resultados para determinados usuarios.
+
+## Método principal: `GenerateInforme`
+
+```csharp Formulario.aspx.cs
+public bool GenerateInforme(int idUser, out string destFile)
+{
+    destFile = HttpContext.Current.Server.MapPath(
+        String.Format("~/informes/Informe{0}_{1}",
+            idUser, DateTime.Now.ToString("ddMMyyyyHHmmss")));
+    string templateFile = HttpContext.Current.Server.MapPath("~/informes/Template.docx");
+
+    try
+    {
+        DirectoryInfo di = Directory.CreateDirectory(Path.GetDirectoryName(destFile));
+
+        InformeWeb.ReportQuery rep = new InformeWeb.ReportQuery(DbConnect.DevXConnString);
+        rep.Parameters[0].Value = idUser;
+        rep.CreateDocument();
+        rep.ExportToDocx(destFile + ".docx");
+
+        RichEditDocumentServer srv = new RichEditDocumentServer();
+        srv.LoadDocument(templateFile);
+        srv.Document.AppendDocumentContent(destFile + ".docx");
+        srv.SaveDocument(destFile + ".docx", DocumentFormat.OpenXml);
+
+        return true;
+    }
+    catch (Exception ee)
+    {
+        destFile += "\n" + ee.Message + "\n" + ee.StackTrace;
+        return false;
+    }
+}
+```
+
+## Pasos del proceso
+
+<Steps>
+  <Step title="Determinar la ruta de salida">
+    La ruta del archivo de destino se construye con el ID del usuario y la marca de tiempo actual:
+
+    ```
+    ~/informes/Informe{idUser}_{ddMMyyyyHHmmss}.docx
+    ```
+
+    Por ejemplo: `~/informes/Informe42_22032026143055.docx`
+
+    El directorio `~/informes/` se crea automáticamente si no existe.
+  </Step>
+
+  <Step title="Ejecutar el informe con DevExpress">
+    Se instancia `InformeWeb.ReportQuery` con la cadena de conexión `DevXConnString`. Se asigna el `idUser` al primer parámetro del informe, se genera el documento (`CreateDocument`) y se exporta a DOCX.
+  </Step>
+
+  <Step title="Combinar con la plantilla">
+    `RichEditDocumentServer` carga `Template.docx` y le adjunta el contenido del informe recién generado mediante `AppendDocumentContent`. El resultado final se guarda sobreescribiendo el archivo de informe.
+  </Step>
+
+  <Step title="Devolver la ruta al llamador">
+    El método devuelve `true` si el proceso completó sin errores. El parámetro `out string destFile` contiene la ruta absoluta del archivo sin extensión; el llamador añade `.docx` al adjuntarlo al correo.
+
+    En caso de excepción, `destFile` incluye el mensaje de error y el stack trace, y el método devuelve `false`.
+  </Step>
+</Steps>
+
+## Método alternativo: `GenerateInformeEXE`
+
+Existe una implementación alternativa que delega la generación a un proceso externo `InformeWeb.exe`:
+
+```csharp Formulario.aspx.cs
+public bool GenerateInformeEXE(int idUser, out string destFile)
+{
+    destFile = HttpContext.Current.Server.MapPath(
+        String.Format("~/informes/Informe{0}_{1}",
+            idUser, DateTime.Now.ToString("ddMMyyyyHHmmss")));
+    try
+    {
+        string exePath = HttpContext.Current.Server.MapPath("~/report/InformeWeb.exe");
+        DirectoryInfo di = Directory.CreateDirectory(Path.GetDirectoryName(destFile));
+
+        ProcessStartInfo pi = new ProcessStartInfo(exePath);
+        pi.WorkingDirectory = Path.GetDirectoryName(exePath);
+        pi.CreateNoWindow = true;
+        pi.Arguments = idUser.ToString() + " " + destFile + ".docx";
+
+        Process p = new Process();
+        p.StartInfo = pi;
+        p.Start();
+        p.WaitForExit();
+
+        return true;
+    }
+    catch (Exception ee)
+    {
+        destFile += "\n" + ee.Message + "\n" + ee.StackTrace;
+        return false;
+    }
+}
+```
+
+Este método lanza `~/report/InformeWeb.exe` pasando como argumentos el ID de usuario y la ruta de destino del DOCX. El proceso se ejecuta de forma síncrona (`WaitForExit`).
+
+## Cuándo se genera el informe
+
+El informe **no** se genera automáticamente para todos los usuarios. Solo se genera y adjunta en el correo `results` para el usuario `carlospi88@yahoo.es` (véase [Notificaciones por email](/features/email-notifications)). Para el resto de usuarios, el correo `results` notifica internamente que el cuestionario ha sido completado, sin adjuntar el DOCX.
+
+## Log de sesión
+
+Independientemente de si se genera el informe, el archivo de log de la sesión siempre se adjunta al correo `results`:
+
+```csharp Formulario.aspx.cs
+msg.Attachments.Add(new Attachment(MySession.Current.LogFile));
+```
+
+La ruta del log sigue el patrón:
+
+```
+~/logs/Log{ddMMyyyyHHmmss}_{idUser}.txt
+```
+
+<Note>
+  `Template.docx` debe existir en `~/informes/Template.docx` antes de que se ejecute `GenerateInforme`. Si el archivo no existe, `RichEditDocumentServer` lanzará una excepción y el método devolverá `false`, incluyendo el stack trace en `destFile`.
+</Note>
+
+<Warning>
+  `GenerateInforme` depende de **DevExpress** (`DevExpress.XtraRichEdit` y el componente de informes `InformeWeb.ReportQuery`). Las licencias de DevExpress deben estar instaladas en el servidor de producción. Si DevExpress no está disponible, usar `GenerateInformeEXE` como alternativa, siempre que `InformeWeb.exe` esté desplegado en `~/report/`.
+</Warning>

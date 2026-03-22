@@ -1,0 +1,210 @@
+---
+title: "Configuración de la base de datos"
+description: "Cómo crear y configurar la base de datos SQL Server para Consultoría Online."
+---
+
+Consultoría Online utiliza SQL Server como motor de base de datos. A continuación se describe el proceso completo de creación y configuración.
+
+<Warning>
+  Crea un usuario de base de datos **dedicado** con los permisos mínimos necesarios (`SELECT`, `INSERT`, `UPDATE`, `DELETE` sobre las tablas de la aplicación). No uses `sa` ni ninguna cuenta con permisos de administrador en producción.
+</Warning>
+
+## Cadena de conexión
+
+La aplicación utiliza **dos cadenas de conexión** definidas como constantes estáticas en `Misc/DbConnect.cs`. Ambas apuntan a la misma base de datos pero con formatos distintos según el consumidor:
+
+```csharp
+// Usada por SqlConnection para todas las operaciones de datos (DAL)
+public static string SqlConnString =
+    @"Server = <host>,<port>; Database = ConsultoriaOnline; User = <usuario>; Password = <contraseña>;";
+
+// Usada por DevExpress (XtraReports / DataAccess) para la generación del informe
+public static string DevXConnString =
+    "data source=<host>,<port>;user id=<usuario>;password=<contraseña>;initial catalog=ConsultoriaOnline;Persist Security Info=true";
+```
+
+El ejemplo en el código fuente apunta al servidor `185.254.207.112` en el puerto `28919`. Sustituye estos valores por los de tu entorno.
+
+<Note>
+  La cadena de conexión en `Web.config` (bajo `<connectionStrings>`) usa el prefijo `XpoProvider=MSSqlServer` y es utilizada por el kit de inicio de DevExpress XPO. Las cadenas de `DbConnect.cs` son independientes y deben actualizarse por separado.
+</Note>
+
+## Proceso de configuración
+
+<Steps>
+  <Step title="Crear la base de datos">
+    Crea la base de datos `ConsultoriaOnline` en tu instancia SQL Server:
+
+    ```sql
+    CREATE DATABASE ConsultoriaOnline;
+    GO
+    ```
+  </Step>
+
+  <Step title="Crear el usuario de aplicación">
+    Crea un login y usuario con permisos mínimos:
+
+    ```sql
+    CREATE LOGIN WebAppConsultoria WITH PASSWORD = 'TuContraseñaSegura';
+    USE ConsultoriaOnline;
+    CREATE USER WebAppConsultoria FOR LOGIN WebAppConsultoria;
+    GRANT SELECT, INSERT, UPDATE, DELETE ON SCHEMA::dbo TO WebAppConsultoria;
+    ```
+  </Step>
+
+  <Step title="Crear las tablas">
+    Ejecuta los siguientes scripts DDL en orden. El esquema refleja las consultas SQL del DAL.
+
+    ```sql
+    -- Tipos de respuesta admitidos por el cuestionario
+    CREATE TABLE TipoRespuesta (
+        IdTipoRespuesta INT PRIMARY KEY,
+        NomTipoRespuesta NVARCHAR(50) NOT NULL
+    );
+
+    -- Modelos de cuestionario (cada instancia del formulario)
+    CREATE TABLE ModeloCuestionario (
+        IdModeloCuestionario INT IDENTITY(1,1) PRIMARY KEY,
+        NomModelo NVARCHAR(200),
+        Descripcion NVARCHAR(500)
+    );
+
+    -- Apartados (secciones) dentro de un modelo
+    CREATE TABLE ApartadoPreguntas (
+        IdApartadoPreguntas INT IDENTITY(1,1) PRIMARY KEY,
+        NomApartado NVARCHAR(200),
+        Descripcion NVARCHAR(500),
+        RidModeloCuestionario1 INT REFERENCES ModeloCuestionario(IdModeloCuestionario)
+    );
+
+    -- Preguntas del cuestionario
+    CREATE TABLE Pregunta (
+        IdPregunta INT IDENTITY(1,1) PRIMARY KEY,
+        TextoPregunta NVARCHAR(500) NOT NULL,
+        RIdTipoRespuesta1 INT NOT NULL REFERENCES TipoRespuesta(IdTipoRespuesta),
+        RIdApartadoPreguntas1 INT REFERENCES ApartadoPreguntas(IdApartadoPreguntas),
+        RIdPregunta1 INT NULL REFERENCES Pregunta(IdPregunta), -- repregunta condicional
+        OrdenAparicion SMALLINT,
+        NoMostrar BIT NOT NULL DEFAULT 0,
+        EsOpcional BIT NOT NULL DEFAULT 0,
+        TextoDeAyuda NVARCHAR(300) NULL,
+        SysTokenCode NVARCHAR(10) NULL -- valor especial del sistema
+    );
+
+    -- Opciones de respuesta para cada pregunta
+    CREATE TABLE RespuestaPosible (
+        IdRespuestaPosible INT IDENTITY(1,1) PRIMARY KEY,
+        TextoRespuesta NVARCHAR(300) NOT NULL,
+        RidPregunta1 INT REFERENCES Pregunta(IdPregunta),
+        TieneTexto BIT NOT NULL DEFAULT 0,
+        PermiteRepregunta BIT NOT NULL DEFAULT 0
+    );
+
+    -- Usuarios registrados en el formulario
+    CREATE TABLE Usuario (
+        IdUsuario INT IDENTITY(1,1) PRIMARY KEY,
+        NombreUsuario NVARCHAR(200),
+        Email NVARCHAR(200),
+        Telefono NVARCHAR(50),
+        Actividad NVARCHAR(200),
+        NumEmpleados INT,
+        NumWorkers NVARCHAR(20),
+        RIdModeloCuestionario1 INT REFERENCES ModeloCuestionario(IdModeloCuestionario),
+        Resultado NVARCHAR(MAX)
+    );
+
+    -- Respuestas guardadas por cada usuario
+    CREATE TABLE RespuestaDelUsuario (
+        IdRespuestaDelUsuario INT IDENTITY(1,1) PRIMARY KEY,
+        RIdUsuario1 INT NOT NULL REFERENCES Usuario(IdUsuario),
+        RIdRespuestaPosible1 INT REFERENCES RespuestaPosible(IdRespuestaPosible),
+        RIdPregunta1 INT NOT NULL REFERENCES Pregunta(IdPregunta),
+        ValorRespuesta NVARCHAR(200),
+        EsSoloTexto BIT NOT NULL DEFAULT 0
+    );
+    ```
+  </Step>
+
+  <Step title="Poblar TipoRespuesta">
+    Inserta los valores requeridos por la enumeración `TipoRespuesta` de la aplicación:
+
+    ```sql
+    INSERT INTO TipoRespuesta (IdTipoRespuesta, NomTipoRespuesta) VALUES
+        (1, 'text'),
+        (2, 'num'),
+        (3, 'radio'),
+        (4, 'check'),
+        (5, 'memo');
+    ```
+
+    | Id | Nombre | Comportamiento en UI |
+    |----|--------|----------------------|
+    | 1 | `text` | Campo de texto libre (una línea) |
+    | 2 | `num` | Campo numérico (valida entero) |
+    | 3 | `radio` | Selección única (radio buttons) |
+    | 4 | `check` | Selección múltiple (checkboxes) |
+    | 5 | `memo` | Área de texto multilínea |
+  </Step>
+
+  <Step title="Crear el ModeloCuestionario con Id 9">
+    El código de `registarUsuario_Click` en `Formulario.aspx.cs` asigna **hardcodeado** el modelo con `Id = 9`:
+
+    ```csharp
+    int modelo = 9;
+    ```
+
+    Debes insertar un registro con ese identificador exacto, o bien ajustar el valor en el código fuente antes de compilar.
+
+    ```sql
+    -- Opción A: insertar con Id específico (requiere SET IDENTITY_INSERT)
+    SET IDENTITY_INSERT ModeloCuestionario ON;
+    INSERT INTO ModeloCuestionario (IdModeloCuestionario, NomModelo, Descripcion)
+    VALUES (9, 'Diagnóstico Digitalización', 'Cuestionario de evaluación del nivel de digitalización empresarial');
+    SET IDENTITY_INSERT ModeloCuestionario OFF;
+    ```
+
+    <Warning>
+      Si el registro con `IdModeloCuestionario = 9` no existe, el registro de nuevos usuarios fallará silenciosamente y la sesión no se iniciará. Verifica que este registro existe antes de poner la aplicación en producción.
+    </Warning>
+  </Step>
+
+  <Step title="Poblar el contenido del cuestionario">
+    Inserta al menos un `ApartadoPreguntas` vinculado al modelo 9, las preguntas correspondientes con sus `RespuestaPosible`, y asegúrate de incluir las cuatro preguntas con `SysTokenCode` especiales. Estas son leídas en `DALRespuestaDelUsuario.LeerValoresUsuario` para actualizar el perfil del usuario al finalizar el cuestionario:
+
+    ```sql
+    -- Ejemplo de apartado
+    INSERT INTO ApartadoPreguntas (NomApartado, Descripcion, RidModeloCuestionario1)
+    VALUES ('Información general', 'Datos de identificación de la empresa', 9);
+
+    -- Preguntas con SysTokenCode obligatorio
+    -- (RIdApartadoPreguntas1 debe coincidir con el IdApartadoPreguntas creado arriba)
+    INSERT INTO Pregunta (TextoPregunta, RIdTipoRespuesta1, RIdApartadoPreguntas1, OrdenAparicion, NoMostrar, EsOpcional, SysTokenCode)
+    VALUES
+        ('¿Cuál es su nombre?',           1, 1, 1, 0, 0, 'NAME'),
+        ('¿Cuál es su teléfono?',         1, 1, 2, 0, 0, 'PHONE'),
+        ('¿Cuál es su actividad?',        1, 1, 3, 0, 0, 'ACTIVITY'),
+        ('¿Cuántos trabajadores tiene?',  3, 1, 4, 0, 0, 'NUMWORKERS');
+    ```
+
+    | SysTokenCode | Propósito |
+    |--------------|-----------|
+    | `NAME` | Nombre del usuario, guardado en `Usuario.NombreUsuario` |
+    | `PHONE` | Teléfono, guardado en `Usuario.Telefono` |
+    | `ACTIVITY` | Actividad de la empresa, guardada en `Usuario.Actividad` |
+    | `NUMWORKERS` | Número de trabajadores (leído desde `RespuestaPosible`), guardado en `Usuario.NumWorkers` |
+  </Step>
+
+  <Step title="Actualizar las cadenas de conexión">
+    Edita `Misc/DbConnect.cs` y sustituye los valores de ejemplo por los de tu entorno:
+
+    ```csharp
+    public static string DevXConnString =
+        "data source=<tu-servidor>,<puerto>;user id=<usuario>;password=<contraseña>;" +
+        "initial catalog=ConsultoriaOnline;Persist Security Info=true";
+
+    public static string SqlConnString =
+        @"Server = <tu-servidor>,<puerto>; Database = ConsultoriaOnline; " +
+        @"User = <usuario>; Password = <contraseña>;";
+    ```
+  </Step>
+</Steps>

@@ -1,0 +1,241 @@
+---
+title: "Modelo de datos"
+description: "Tablas de la base de datos, sus relaciones y los campos clave del sistema."
+---
+
+La base de datos `ConsultoriaOnline` en SQL Server contiene siete tablas principales. El diagrama de relaciones simplificado es el siguiente:
+
+```
+ModeloCuestionario
+  │
+  └──< ApartadoPreguntas
+         │
+         └──< Pregunta
+                │
+                ├──< RespuestaPosible
+                │      │
+                │      └──< RespuestaDelUsuario
+                │
+                └── (RIdPregunta1, FK auto-referencial → Pregunta)
+
+Usuario
+  └──< RespuestaDelUsuario
+  └── RIdModeloCuestionario1 → ModeloCuestionario
+```
+
+<Note>
+  El campo `SysTokenCode` de la tabla `Pregunta` actúa como identificador especial que permite al sistema extraer automáticamente datos del usuario (nombre, teléfono, sector, número de trabajadores) de sus propias respuestas al finalizar el cuestionario.
+</Note>
+
+---
+
+## Tablas
+
+<AccordionGroup>
+
+  <Accordion title="ModeloCuestionario — Modelos de cuestionario">
+    Define las distintas versiones del cuestionario que puede usar la aplicación.
+
+    | Campo | Tipo | Descripción |
+    |---|---|---|
+    | `IdModeloCuestionario` | `int` PK | Identificador del modelo |
+    | `NomModelo` | `nvarchar` | Nombre del modelo de cuestionario |
+    | `Descripcion` | `nvarchar` | Descripción del modelo |
+
+    **Clase C#:** `ModeloCuestionario` · **DAL:** `DALModeloCuestionario`
+
+    ```sql
+    -- Consulta usada por DALModeloCuestionario
+    SELECT * FROM ModeloCuestionario
+    ```
+
+    En el flujo actual, el registro de usuarios utiliza el modelo con `IdModeloCuestionario = 9`, asignado en `registarUsuario_Click`.
+  </Accordion>
+
+  <Accordion title="ApartadoPreguntas — Secciones del cuestionario">
+    Agrupa preguntas en secciones temáticas dentro de un modelo.
+
+    | Campo | Tipo | Descripción |
+    |---|---|---|
+    | `IdApartadoPreguntas` | `int` PK | Identificador del apartado |
+    | `NomApartado` | `nvarchar` | Nombre visible del apartado (mostrado en el encabezado de la pregunta) |
+    | `Descripcion` | `nvarchar` | Descripción interna |
+    | `RidModeloCuestionario1` | `int` FK → `ModeloCuestionario` | Modelo al que pertenece |
+
+    **Clase C#:** `ApartadoPreguntas` · **DAL:** `DALApartadoPreguntas`
+
+    ```sql
+    -- Consulta usada por DALApartadoPreguntas
+    SELECT * FROM ApartadoPreguntas
+    ```
+
+    El nombre del apartado (`NomApartado`) se muestra en la UI como encabezado gris sobre el texto de la pregunta.
+  </Accordion>
+
+  <Accordion title="Pregunta — Preguntas del cuestionario">
+    Cada fila es una pregunta que puede aparecer en el formulario.
+
+    | Campo | Tipo | Descripción |
+    |---|---|---|
+    | `IdPregunta` | `int` PK | Identificador de la pregunta |
+    | `TextoPregunta` | `nvarchar` | Texto de la pregunta mostrado al usuario |
+    | `RIdApartadoPreguntas1` | `int` FK → `ApartadoPreguntas` | Sección a la que pertenece |
+    | `RIdTipoRespuesta1` | `int` FK → `TipoRespuesta` | Tipo de control de respuesta (ver tabla abajo) |
+    | `RIdPregunta1` | `int?` FK → `Pregunta` | Pregunta padre (auto-referencial); no nulo indica una re-pregunta |
+    | `OrdenAparicion` | `Int16?` | Posición de la pregunta en la secuencia |
+    | `NoMostrar` | `bit` | Si es `true`, la pregunta se excluye del cuestionario |
+    | `TextoDeAyuda` | `nvarchar?` | Texto de ayuda contextual mostrado bajo la pregunta |
+    | `EsOpcional` | `bit` | Si es `true`, se puede pasar sin responder |
+    | `SysTokenCode` | `nvarchar?` | Código especial del sistema (ver nota abajo) |
+
+    **Clase C#:** `Pregunta` · **DAL:** `DALPregunta`
+
+    ```sql
+    -- Consulta usada por DALPregunta.ObtenerPreguntas()
+    SELECT p.*, a.NomApartado
+    FROM Pregunta p
+    INNER JOIN ApartadoPreguntas a
+        ON a.IdApartadoPreguntas = p.RIdApartadoPreguntas1
+    WHERE a.RIdModeloCuestionario1 = @IdModeloCuestionario
+      AND p.NoMostrar = 0
+    ORDER BY OrdenAparicion
+    ```
+
+    **Tipos de respuesta (`RIdTipoRespuesta1`):**
+
+    | Valor | Nombre | Control renderizado |
+    |---|---|---|
+    | `1` | `text` | `TextBox` de una línea (texto libre) |
+    | `2` | `num` | `TextBox` numérico con validación `Int32.TryParse` |
+    | `3` | `radio` | `RadioButton` (selección única) |
+    | `4` | `check` | `CheckBox` (selección múltiple) |
+    | `5` | `memo` | `TextBox` multilínea (comentario largo) |
+
+    <Note>
+      `SysTokenCode` vincula respuestas concretas con campos del perfil del usuario. Los valores reconocidos son:
+
+      - **`NAME`** → `Usuario.NombreUsuario`
+      - **`PHONE`** → `Usuario.Telefono`
+      - **`ACTIVITY`** → `Usuario.Actividad` (admite valor libre o respuesta seleccionada)
+      - **`NUMWORKERS`** → `Usuario.NumWorkers` (se lee el `TextoRespuesta` de `RespuestaPosible`, no el `ValorRespuesta`)
+
+      Al finalizar el cuestionario, `DALRespuestaDelUsuario.LeerValoresUsuario()` ejecuta estas búsquedas y actualiza la ficha del usuario con `DALUsuario.UpdateUsuario()`.
+    </Note>
+  </Accordion>
+
+  <Accordion title="TipoRespuesta — Tipos de respuesta">
+    Tabla de referencia con los tipos de control de respuesta disponibles.
+
+    | Campo | Tipo | Descripción |
+    |---|---|---|
+    | `IdTipoRespuesta` | `int` PK | Identificador (1–5) |
+    | `NomTipoRespuesta` | `nvarchar` | Nombre descriptivo del tipo |
+
+    **Clase C#:** `TipoRespuesta` · **DAL:** `DALTipoRespuestas`
+
+    ```sql
+    SELECT * FROM TipoRespuesta
+    ```
+  </Accordion>
+
+  <Accordion title="RespuestaPosible — Opciones de respuesta">
+    Define las opciones disponibles para preguntas de tipo `radio` o `check`, y el placeholder/label para preguntas de tipo `text`, `num` y `memo`.
+
+    | Campo | Tipo | Descripción |
+    |---|---|---|
+    | `IdRespuestaPosible` | `int` PK | Identificador de la opción |
+    | `TextoRespuesta` | `nvarchar` | Texto de la opción o etiqueta del campo |
+    | `RidPregunta1` | `int?` FK → `Pregunta` | Pregunta a la que pertenece esta opción |
+    | `TieneTexto` | `bit` | Si es `true`, la opción incluye un `TextBox` adicional para texto libre |
+    | `PermiteRepregunta` | `bit` | Si es `true`, seleccionar esta opción activa la re-pregunta vinculada |
+
+    **Clase C#:** `RespuestaPosible` · **DAL:** `DALRespuestaPosible`
+
+    ```sql
+    -- Consulta usada por DALRespuestaPosible.ObtenerRespuestasPosibles()
+    SELECT r.*
+    FROM RespuestaPosible r
+    INNER JOIN Pregunta p
+        ON r.RIdPregunta1 = p.IdPregunta
+    INNER JOIN ApartadoPreguntas a
+        ON a.IdApartadoPreguntas = p.RIdApartadoPreguntas1
+    WHERE a.RIdModeloCuestionario1 = @IdModeloCuestionario
+      AND p.NoMostrar = 0
+    ```
+  </Accordion>
+
+  <Accordion title="Usuario — Usuarios registrados">
+    Cada fila representa un participante que inició el cuestionario.
+
+    | Campo | Tipo | Descripción |
+    |---|---|---|
+    | `IdUsuario` | `int` PK | Identificador generado en el INSERT |
+    | `NombreUsuario` | `nvarchar(200)` | Nombre, extraído de la respuesta con `SysTokenCode=NAME` al finalizar |
+    | `Email` | `nvarchar(200)` | Dirección de correo, capturada en el registro inicial |
+    | `Telefono` | `nvarchar(50)` | Teléfono, extraído de `SysTokenCode=PHONE` |
+    | `Actividad` | `nvarchar(200)` | Sector de actividad, de `SysTokenCode=ACTIVITY` |
+    | `NumEmpleados` | `int?` | Valor numérico inicial (capturado en el registro, actualmente en desuso) |
+    | `NumWorkers` | `nvarchar(20)` | Rango de trabajadores, de `SysTokenCode=NUMWORKERS` |
+    | `RIdModeloCuestionario1` | `int` FK → `ModeloCuestionario` | Modelo asignado al usuario |
+    | `Resultado` | `nvarchar` | Texto de resultados en bruto (uso futuro) |
+
+    **DAL:** `DALUsuario`
+
+    ```sql
+    -- INSERT en DALUsuario.NuevoUsuario()
+    INSERT INTO Usuario
+        (NombreUsuario, Email, Telefono, Actividad, NumEmpleados, RIdModeloCuestionario1)
+    OUTPUT INSERTED.IdUsuario
+    VALUES (@NombreUsuario, @Email, @Telefono, @Actividad, @NumEmpleados, @RIdModeloCuestionario1)
+    ```
+
+    ```sql
+    -- UPDATE en DALUsuario.UpdateUsuario() (ejecutado al finalizar el cuestionario)
+    UPDATE Usuario
+    SET NombreUsuario = @NombreUsuario,
+        Telefono      = @Telefono,
+        Actividad     = @Actividad,
+        NumWorkers    = @NumWorkers
+    WHERE IdUsuario = @IdUsuario
+    ```
+  </Accordion>
+
+  <Accordion title="RespuestaDelUsuario — Respuestas dadas por cada usuario">
+    Registra cada respuesta individual que da el usuario durante el cuestionario. Cada vez que el usuario pulsa "Siguiente", las respuestas anteriores a esa pregunta se borran y se reinsertan, permitiendo la navegación hacia atrás.
+
+    | Campo | Tipo | Descripción |
+    |---|---|---|
+    | `RIdUsuario1` | `int` FK → `Usuario` | Usuario que respondió |
+    | `RIdRespuestaPosible1` | `int` FK → `RespuestaPosible` | Opción seleccionada |
+    | `RIdPregunta1` | `int` FK → `Pregunta` | Pregunta respondida |
+    | `ValorRespuesta` | `nvarchar(200)` | Texto libre introducido (si aplica) |
+    | `EsSoloTexto` | `bit` | Indica si la respuesta es exclusivamente texto (sin opción seleccionada) |
+
+    **DAL:** `DALRespuestaDelUsuario`
+
+    ```sql
+    -- INSERT en DALRespuestaDelUsuario.NuevaRespuesta()
+    INSERT INTO RespuestaDelUsuario
+        (RIdUsuario1, RIdRespuestaPosible1, RIdPregunta1, ValorRespuesta, EsSoloTexto)
+    VALUES (@RidUsuario1, @RidRespuestaPosible1, @RIdPregunta1, @ValorRespuesta, @EsSoloTexto)
+    ```
+
+    ```sql
+    -- DELETE previo al INSERT (en DALRespuestaDelUsuario.BorrarAnteriorRespuesta())
+    -- Garantiza que al pulsar "Anterior" y volver a responder no se dupliquen registros
+    DELETE FROM RespuestaDelUsuario
+    WHERE RIdUsuario1 = @RidUsuario1
+      AND RIdPregunta1 = @RIdPregunta1
+    ```
+
+    ```sql
+    -- Lectura de valores especiales (SysTokenCode) al finalizar el cuestionario
+    SELECT ru.ValorRespuesta
+    FROM Pregunta p
+    INNER JOIN RespuestaDelUsuario ru ON ru.RIdPregunta1 = p.IdPregunta
+    WHERE ru.RIdUsuario1 = @RidUsuario1
+      AND p.SysTokenCode = @SysTokenCode   -- 'NAME' | 'PHONE' | 'ACTIVITY'
+    ```
+  </Accordion>
+
+</AccordionGroup>

@@ -1,0 +1,111 @@
+---
+title: "ModeloCuestionario"
+description: "Clase de dominio que representa un modelo de cuestionario completo."
+---
+
+## Class definition
+
+```csharp Classes/ModeloCuestionario.cs
+namespace ConsultoriaOnline
+{
+    public class ModeloCuestionario
+    {
+        private int idModeloCuestionario;
+        private string nomModelo;
+        private string descripcion;
+
+        public int IdModeloCuestionario { get => idModeloCuestionario; set => idModeloCuestionario = value; }
+        public string NomModelo { get => nomModelo; set => nomModelo = value; }
+        public string Descripcion { get => descripcion; set => descripcion = value; }
+    }
+}
+```
+
+## Properties
+
+<ResponseField name="IdModeloCuestionario" type="int" required>
+  Primary key. Acts as the root filter for all data loaded in a questionnaire session. The
+  active model is resolved at registration time and stored in `MySession.Current.IdModeloCuestionario`.
+
+  <Note>
+    Model ID **9** is hardcoded in `registarUsuario_Click` as the currently active questionnaire
+    model. The session default is 1, but it is overridden to 9 immediately after a successful
+    user registration.
+  </Note>
+</ResponseField>
+
+<ResponseField name="NomModelo" type="string">
+  Human-readable name for the questionnaire model. Used for administrative identification.
+</ResponseField>
+
+<ResponseField name="Descripcion" type="string">
+  Optional description of the model's purpose or scope.
+</ResponseField>
+
+## Model system
+
+The model system allows multiple distinct questionnaire configurations to coexist in the same
+database. The `IdModeloCuestionario` value flows down through the entire data hierarchy:
+
+```
+ModeloCuestionario
+  └── ApartadoPreguntas  (RidModeloCuestionario1)
+        └── Pregunta     (RidApartadoPreguntas1)
+              └── RespuestaPosible (RidPregunta1)
+```
+
+All three DAL queries — `ObtenerPreguntas`, `ObtenerRespuestasPosibles`, and the section JOIN —
+ultimately filter by `a.RIdModeloCuestionario1 = {idModeloCuestionario}`, so changing the model
+ID completely changes the set of sections, questions, and answers presented to the user.
+
+## Model assignment at registration
+
+When a user registers, `registarUsuario_Click` sets the model to 9 and persists it in the session:
+
+```csharp Formulario.aspx.cs
+protected void registarUsuario_Click(object sender, EventArgs e)
+{
+    int modelo = 9;
+
+    DALUsuario dal = new DALUsuario();
+    idUser = dal.NuevoUsuario("", email.Text, "", "", 0, modelo);
+
+    if (idUser != null)
+    {
+        MySession.Current.IdModeloCuestionario = modelo;
+        // ...
+    }
+}
+```
+
+The model ID is also written to the `Usuario` record in the database, so results can always be
+re-associated with the model that was active when the user completed the questionnaire.
+
+## Loading models
+
+`DALModeloCuestionario.ObtenerModelosCuestionarios` returns all models with a plain
+`SELECT * FROM ModeloCuestionario`:
+
+```csharp DAL/DALModeloCuestionario.cs
+public List<ModeloCuestionario> ObtenerModelosCuestionarios()
+{
+    SqlDataReader reader = MainCnx.CreateQuery("SELECT * FROM ModeloCuestionario");
+    List<ModeloCuestionario> ModelosCuestionarios = new List<ModeloCuestionario>();
+
+    while (reader.Read())
+    {
+        ModeloCuestionario ModeloCuestionario = new ModeloCuestionario();
+        ModeloCuestionario.IdModeloCuestionario = (int)reader["IdModeloCuestionario"];
+        ModeloCuestionario.NomModelo     = (string)utils.GestionarNulos(reader["NomModelo"]);
+        ModeloCuestionario.Descripcion   = (string)utils.GestionarNulos(reader["Descripcion"]);
+        ModelosCuestionarios.Add(ModeloCuestionario);
+    }
+    return ModelosCuestionarios;
+}
+```
+
+<Tip>
+  To deploy a different questionnaire configuration, create a new `ModeloCuestionario` row,
+  associate `ApartadoPreguntas` sections and `Pregunta` questions to it, and update the hardcoded
+  model ID in `registarUsuario_Click`.
+</Tip>

@@ -1,0 +1,85 @@
+---
+title: "ApartadoPreguntas"
+description: "Clase de dominio que representa una sección o apartado del cuestionario."
+---
+
+## Class definition
+
+```csharp Classes/ApartadoPreguntas.cs
+namespace ConsultoriaOnline
+{
+    public class ApartadoPreguntas
+    {
+        private int idApartadoPreguntas;
+        private string nomApartado;
+        private string descripcion;
+        private int? ridModeloCuestionario1;
+
+        public int IdApartadoPreguntas { get => idApartadoPreguntas; set => idApartadoPreguntas = value; }
+        public string NomApartado { get => nomApartado; set => nomApartado = value; }
+        public string Descripcion { get => descripcion; set => descripcion = value; }
+        public int? RidModeloCuestionario1 { get => ridModeloCuestionario1; set => ridModeloCuestionario1 = value; }
+    }
+}
+```
+
+## Properties
+
+<ResponseField name="IdApartadoPreguntas" type="int" required>
+  Primary key. Referenced by `Pregunta.RidApartadoPreguntas1` to assign a question to a section.
+</ResponseField>
+
+<ResponseField name="NomApartado" type="string">
+  The section name displayed as a grey `<h4>` header above each group of questions. It is
+  surfaced on `Pregunta` instances via a JOIN as `Pregunta.NombreApartado`.
+</ResponseField>
+
+<ResponseField name="Descripcion" type="string">
+  Optional free-text description of the section. Not currently rendered in the questionnaire UI.
+</ResponseField>
+
+<ResponseField name="RidModeloCuestionario1" type="int?">
+  Foreign key to `ModeloCuestionario`. Each section belongs to exactly one questionnaire model.
+  This relationship is the primary filter used when loading questions for a session.
+</ResponseField>
+
+## Role in the question loading query
+
+`ApartadoPreguntas` is not loaded independently at runtime. Instead it participates in the JOIN
+inside `DALPregunta.ObtenerPreguntas`, where it serves two purposes:
+
+1. **Filtering** — only questions whose section belongs to the active `ModeloCuestionario` are returned.
+2. **Enriching** — the section name is read from the joined row and assigned to `Pregunta.NombreApartado`.
+
+```csharp DAL/DALPregunta.cs
+SELECT p.*, a.NomApartado
+FROM Pregunta p
+INNER JOIN ApartadoPreguntas a
+    ON a.IdApartadoPreguntas = p.RIdApartadoPreguntas1
+WHERE a.RIdModeloCuestionario1 = {0}
+  AND p.NoMostrar = 0
+ORDER BY OrdenAparicion
+```
+
+The same pattern is used in `DALRespuestaPosible.ObtenerRespuestasPosibles` to scope possible
+answers to the active model.
+
+## Rendering the section header
+
+Each time a new question is displayed, `MostrarSiguientePregunta` writes the section name into
+the `LabelApartado` control:
+
+```csharp Formulario.aspx.cs
+LabelApartado.Text = @"<h4 style=""color: grey;"">"
+    + pregActual.NombreApartado
+    + "</h4><br>";
+```
+
+Because `NombreApartado` is carried directly on the `Pregunta` object, no additional database
+read is needed at display time.
+
+<Note>
+  `DALApartadoPreguntas.ObtenerApartadosPreguntas` performs a plain `SELECT * FROM ApartadoPreguntas`
+  with no model filter. This method is available for administrative use but is not called during
+  the normal questionnaire flow.
+</Note>

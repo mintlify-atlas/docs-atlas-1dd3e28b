@@ -1,0 +1,153 @@
+---
+title: "Visión general de la arquitectura"
+description: "Capas de la aplicación, tecnologías utilizadas y flujo de datos de extremo a extremo."
+---
+
+## Stack tecnológico
+
+<CardGroup cols={2}>
+  <Card title="Plataforma" icon="server">
+    ASP.NET Web Forms sobre .NET 4.7.2, hospedado en IIS. La compilación apunta a `targetFramework="4.7.2"` en `Web.config`.
+  </Card>
+  <Card title="Base de datos" icon="database">
+    SQL Server remoto (puerto 28919). La cadena de conexión se gestiona en `DbConnect.cs` mediante `System.Data.SqlClient`.
+  </Card>
+  <Card title="Interfaz de usuario" icon="window">
+    ASPX / code-behind (C#). Las actualizaciones parciales se realizan con `UpdatePanel` de ASP.NET AJAX, evitando recargas completas de página.
+  </Card>
+  <Card title="Generación de informes" icon="file-word">
+    DevExpress `XtraRichEdit` y `InformeWeb.ReportQuery` producen el fichero DOCX final a partir de una plantilla (`~/informes/Template.docx`).
+  </Card>
+</CardGroup>
+
+### Dependencias externas
+
+| Librería | Uso |
+|---|---|
+| **DevExpress XtraRichEdit** | Generación y combinación del informe DOCX |
+| **HtmlAgilityPack** | Conversión de HTML a texto plano para el cuerpo alternativo del correo |
+| **RestSharp** | Cliente HTTP para el envío de correos vía Turbo-SMTP API (ruta alternativa) |
+| **Newtonsoft.Json** | Serialización de la petición REST a Turbo-SMTP |
+
+---
+
+## Arquitectura de tres capas
+
+```
+┌─────────────────────────────────────────────────────┐
+│  CAPA DE PRESENTACIÓN                               │
+│  Formulario.aspx  +  Formulario.aspx.cs             │
+│  UpdatePanel → postbacks parciales (AJAX)           │
+└───────────────────────┬─────────────────────────────┘
+                        │ llamadas a DAL
+┌───────────────────────▼─────────────────────────────┐
+│  CAPA DE ACCESO A DATOS (DAL)                       │
+│  DALUsuario · DALPregunta · DALRespuestaPosible      │
+│  DALRespuestaDelUsuario · DALApartadoPreguntas       │
+│  DALModeloCuestionario · DALTipoRespuestas           │
+│  DbConnect  (SqlConnection / SqlCommand)             │
+└───────────────────────┬─────────────────────────────┘
+                        │ SQL (puerto 28919)
+┌───────────────────────▼─────────────────────────────┐
+│  BASE DE DATOS  –  SQL Server                       │
+│  ConsultoriaOnline                                  │
+│  Usuario · Pregunta · RespuestaPosible               │
+│  RespuestaDelUsuario · ApartadoPreguntas             │
+│  ModeloCuestionario · TipoRespuesta                  │
+└─────────────────────────────────────────────────────┘
+```
+
+El estado transversal (usuario activo, preguntas cargadas, logger) se mantiene en `MySession`, almacenado en la sesión HTTP de ASP.NET.
+
+---
+
+## Punto de entrada único
+
+<Note>
+  Toda la aplicación vive en **una sola página**: `Formulario.aspx`. El `Web.config` la declara como documento por defecto de IIS y la regla de reescritura `SSL: https://consultoriadedatos.com` redirige cualquier ruta no reconocida a ella.
+</Note>
+
+El comportamiento visible cambia según qué panel está activo. Los cuatro paneles son mutuamente excluyentes:
+
+| Panel | Cuándo se muestra |
+|---|---|
+| `registrationForm` | Usuario no registrado (`IdUsuario == 0`) |
+| `registradoMsg` | Tras el registro exitoso, antes de empezar |
+| `itemForm` | Durante el cuestionario (pregunta activa) |
+| `finalizadoMsg` | Cuestionario completado |
+
+---
+
+## Flujo de datos de extremo a extremo
+
+```
+Navegador
+  │
+  │  HTTPS (redirigido por IIS rewrite rule "Force HTTPS")
+  ▼
+Formulario.aspx  ←──────────────────────────────────────┐
+  │  UpdatePanel (postback parcial)                      │
+  ▼                                                      │
+Formulario.aspx.cs  (code-behind)                        │
+  │  MySession.Current  ──→  HttpContext.Session         │
+  │                                                      │
+  ├── DALUsuario.NuevoUsuario()                          │
+  ├── DALPregunta.ObtenerPreguntas()                     │
+  ├── DALRespuestaPosible.ObtenerRespuestasPosibles()    │
+  ├── DALRespuestaDelUsuario.NuevaRespuesta()            │
+  └── DALRespuestaDelUsuario.LeerValoresUsuario()        │
+            │                                            │
+            ▼                                            │
+        SQL Server  ──────────────────────────────────── ┘
+              (respuesta con datos → actualiza UI)
+```
+
+### Flujo de generación del informe
+
+```
+Formulario.aspx.cs  (butSiguiente_Click – última pregunta)
+  │
+  ├── DALRespuestaDelUsuario.LeerValoresUsuario()
+  │     └── extrae NAME, PHONE, ACTIVITY, NUMWORKERS
+  ├── DALUsuario.UpdateUsuario()  (persiste datos del usuario)
+  │
+  ├── EnviarMail(MailType.finalized)  ──→  SMTP (confirmación al usuario)
+  │
+  └── EnviarMail(MailType.results)
+        └── GenerateInforme(idUsuario)
+              ├── InformeWeb.ReportQuery  (DevExpress)
+              │     └── consulta SQL → contenido del informe
+              ├── ExportToDocx()  →  ~/informes/Informe{id}_{ts}.docx
+              ├── RichEditDocumentServer.LoadDocument(Template.docx)
+              ├── AppendDocumentContent()  (combina plantilla + informe)
+              └── SaveDocument()  →  DOCX final adjunto al correo
+```
+
+---
+
+## Seguridad y transporte
+
+El `Web.config` incluye una regla IIS URL Rewrite que redirige de forma permanente (301) cualquier petición HTTP a HTTPS:
+
+```xml
+<rule name="Force HTTPS" enabled="true">
+  <match url="(.*)" ignoreCase="false" />
+  <conditions>
+    <add input="{HTTPS}" pattern="off" />
+  </conditions>
+  <action type="Redirect" url="https://{HTTP_HOST}/{R:1}"
+          appendQueryString="true" redirectType="Permanent" />
+</rule>
+```
+
+---
+
+## Logging por sesión
+
+Cada sesión de usuario genera un fichero de log independiente en el servidor:
+
+```
+~/logs/Log{ddMMyyyyHHmmss}_{IdUsuario}.txt
+```
+
+El `StreamWriter` se inicializa de forma perezosa (lazy) la primera vez que se accede a `MySession.Current.Logger` y se cierra explícitamente al finalizar el cuestionario con `MySession.Current.Logger.Close()`. El fichero de log se adjunta además al correo interno de resultados.

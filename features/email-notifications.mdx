@@ -1,0 +1,172 @@
+---
+title: "Notificaciones por email"
+description: "Los tres tipos de email enviados por la plataforma y cómo configurar el servidor SMTP."
+---
+
+La plataforma envía correos electrónicos en tres momentos del ciclo de vida del usuario. Todos se despachan mediante el método asíncrono `EnviarMail` usando `SmtpClient.SendMailAsync`.
+
+## Configuración SMTP
+
+Los parámetros de conexión están definidos directamente en el código de `EnviarMail`:
+
+| Parámetro  | Valor                                    |
+|------------|------------------------------------------|
+| Host       | `uk.scriptmail.yourwebservers.com`       |
+| Puerto     | `25`                                     |
+| SSL        | Habilitado (`EnableSsl = true`)          |
+| Remitente  | `webregister@consultoriadedatos.com`     |
+| BCC        | `webregister@consultoriadedatos.com`     |
+
+```csharp Formulario.aspx.cs
+SmtpClient smtpSender = new SmtpClient();
+smtpSender.Host = "uk.scriptmail.yourwebservers.com";
+smtpSender.Credentials = new System.Net.NetworkCredential(
+    "consultoriadedatos.com@script.mail", "6g-QkK2!");
+smtpSender.Port = 25;
+smtpSender.EnableSsl = true;
+
+await smtpSender.SendMailAsync(msg);
+```
+
+<Warning>
+  Las credenciales SMTP están hardcodeadas en el código fuente. Esto supone un riesgo de seguridad: cualquier persona con acceso al repositorio puede leerlas. Se recomienda moverlas a `Web.config` bajo `<appSettings>` o usar variables de entorno, y excluir el archivo de configuración del control de versiones.
+</Warning>
+
+## Tipos de email
+
+<Tabs>
+  <Tab title="register">
+    ### Correo de confirmación de registro
+
+    Enviado al usuario inmediatamente tras el registro exitoso.
+
+    | Campo      | Valor |
+    |------------|-------|
+    | Destinatario | Email introducido en el formulario |
+    | Asunto     | `Su Registro - Consultoria de Datos` |
+    | Plantilla  | `~/mails/REGISTER.html` |
+
+    **Reemplazos en la plantilla:**
+
+    | Token    | Valor sustituido |
+    |----------|------------------|
+    | `@COMPANY` | `Consultoria de Datos` |
+    | `@MAIL`    | Email del usuario |
+
+    ```csharp Formulario.aspx.cs
+    case MailType.register:
+        msg.To.Add(new MailAddress(email));
+        msg.Subject = "Su Registro - Consultoria de Datos";
+
+        htmlBody = File.ReadAllText(
+            HttpContext.Current.Server.MapPath("~/mails/REGISTER.html"));
+        htmlBody = htmlBody.Replace("@COMPANY", "Consultoria de Datos");
+        htmlBody = htmlBody.Replace("@MAIL", email);
+
+        alternate = AlternateView.CreateAlternateViewFromString(
+            htmlBody, null, MediaTypeNames.Text.Html);
+        msg.AlternateViews.Add(alternate);
+
+        alternate = AlternateView.CreateAlternateViewFromString(
+            ConvertToPlainText(htmlBody), null, MediaTypeNames.Text.Plain);
+        msg.AlternateViews.Add(alternate);
+        break;
+    ```
+  </Tab>
+
+  <Tab title="finalized">
+    ### Correo de finalización del cuestionario
+
+    Enviado al usuario cuando responde la última pregunta del cuestionario.
+
+    | Campo      | Valor |
+    |------------|-------|
+    | Destinatario | Email del usuario |
+    | Asunto     | `Su estudio de Digitalización - Consultoria de Datos` |
+    | Plantilla  | `~/mails/FINALIZED.html` |
+
+    **Reemplazos en la plantilla:**
+
+    | Token    | Valor sustituido |
+    |----------|------------------|
+    | `@COMPANY` | `Consultoria de Datos` |
+    | `@MAIL`    | Email del usuario |
+
+    ```csharp Formulario.aspx.cs
+    case MailType.finalized:
+        msg.To.Add(new MailAddress(email));
+        msg.Subject = "Su estudio de Digitalización - Consultoria de Datos";
+
+        htmlBody = File.ReadAllText(
+            HttpContext.Current.Server.MapPath("~/mails/FINALIZED.html"));
+        htmlBody = htmlBody.Replace("@COMPANY", "Consultoria de Datos");
+        htmlBody = htmlBody.Replace("@MAIL", email);
+
+        alternate = AlternateView.CreateAlternateViewFromString(
+            htmlBody, null, MediaTypeNames.Text.Html);
+        msg.AlternateViews.Add(alternate);
+
+        alternate = AlternateView.CreateAlternateViewFromString(
+            ConvertToPlainText(htmlBody), null, MediaTypeNames.Text.Plain);
+        msg.AlternateViews.Add(alternate);
+        break;
+    ```
+  </Tab>
+
+  <Tab title="results">
+    ### Correo interno de resultados
+
+    Enviado a `pguillon@vegalia.com` al finalizar el cuestionario. Notifica internamente que un usuario ha completado el estudio y adjunta el log de sesión.
+
+    | Campo      | Valor |
+    |------------|-------|
+    | Destinatario principal | `pguillon@vegalia.com` (Pascal Guillon) |
+    | Asunto     | `Documento Informe disponible DESDE LA APP - Consultoria de Datos - {email}` |
+    | Adjunto fijo | Archivo de log `~/logs/Log{fecha}_{idUser}.txt` |
+
+    **Comportamiento condicional según el usuario:**
+
+    - Para `carlospi88@yahoo.es`: también se envía a ese email y se genera y adjunta el informe DOCX mediante `GenerateInforme`.
+    - Para el resto: se añaden como destinatarios adicionales `xavier.garcia@vegalia.com` y `david@bluegestus.com`. El informe DOCX no se genera.
+
+    ```csharp Formulario.aspx.cs
+    case MailType.results:
+        msg.To.Add(new MailAddress("pguillon@vegalia.com", "Pascal Guillon"));
+        msg.Subject = "Documento Informe disponible DESDE LA APP - Consultoria de Datos - " + email;
+        msg.Body = "YA NO SE INCLUYE el archivo resultado de la consultoria";
+
+        if (email == "carlospi88@yahoo.es")
+        {
+            msg.To.Add(new MailAddress("carlospi88@yahoo.es", "Carlos Picas"));
+            GenerateInforme(MySession.Current.IdUsuario, out string destFile);
+            msg.Attachments.Add(new Attachment(destFile + ".docx"));
+        }
+        else
+        {
+            msg.To.Add(new MailAddress("xavier.garcia@vegalia.com", "Xavier Garcia"));
+            msg.To.Add(new MailAddress("david@bluegestus.com", "David Argilés"));
+        }
+        msg.Attachments.Add(new Attachment(MySession.Current.LogFile));
+        break;
+    ```
+  </Tab>
+</Tabs>
+
+## Cuerpo HTML y vista alternativa en texto plano
+
+Todos los correos con plantilla HTML incluyen una vista alternativa en texto plano generada automáticamente. El método `ConvertToPlainText` usa **HtmlAgilityPack** para recorrer el árbol DOM y extraer el texto, respetando saltos de línea en elementos `<p>` y `<br>`:
+
+```csharp Formulario.aspx.cs
+public static string ConvertToPlainText(string html)
+{
+    HtmlDocument doc = new HtmlDocument();
+    doc.LoadHtml(html);
+
+    StringWriter sw = new StringWriter();
+    ConvertTo(doc.DocumentNode, sw);
+    sw.Flush();
+    return sw.ToString();
+}
+```
+
+Esto garantiza la compatibilidad con clientes de correo que no renderizan HTML.

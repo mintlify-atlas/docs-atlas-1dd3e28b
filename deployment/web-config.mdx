@@ -1,0 +1,214 @@
+---
+title: "Configuración de Web.config"
+description: "Todas las claves de configuración de Web.config y cómo personalizarlas."
+---
+
+El archivo `Web.config` es el punto central de configuración de la aplicación ASP.NET. A continuación se describen todas las secciones relevantes y las modificaciones necesarias antes de desplegar en producción.
+
+## Estructura completa
+
+Esta es la configuración base del archivo `Web.config` del proyecto:
+
+```xml Web.config
+<?xml version="1.0" encoding="utf-8"?>
+<configuration>
+  <connectionStrings>
+    <add name="vegalia-abogado\vegalia.ConsultoriaOnline.dbo"
+         connectionString="XpoProvider=MSSqlServer;data source=185.254.207.112,28919;
+           user id=CarlosP;password=...;initial catalog=ConsultoriaOnline;
+           Persist Security Info=true" />
+  </connectionStrings>
+
+  <system.web>
+    <compilation debug="true" targetFramework="4.7.2" />
+    <httpRuntime targetFramework="4.7.2" />
+    <customErrors mode="Off"/>
+    <machineKey
+      validation="SHA1"
+      decryption="AES"
+      validationKey="55B75A2EC1632818606EFF5DEBD9B6ED97624A26"
+      decryptionKey="BE928165D99AF384EED608443AD1B788A199CE83EAE0A9EEF23AD8C2C0F943EF" />
+  </system.web>
+
+  <system.webServer>
+    <rewrite>
+      <rules>
+        <rule name="Force HTTPS" enabled="true">
+          <match url="(.*)" ignoreCase="false" />
+          <conditions>
+            <add input="{HTTPS}" pattern="off" />
+          </conditions>
+          <action type="Redirect" url="https://{HTTP_HOST}/{R:1}"
+                  appendQueryString="true" redirectType="Permanent" />
+        </rule>
+        <rule name="SSL: https://consultoriadedatos.com" patternSyntax="Wildcard">
+          <match url="*"/>
+          <conditions>
+            <add input="{REQUEST_FILENAME}" matchType="IsFile" negate="true"/>
+            <add input="{REQUEST_FILENAME}" matchType="IsDirectory" negate="true"/>
+          </conditions>
+          <action type="Rewrite" url="Formulario.aspx"/>
+        </rule>
+      </rules>
+    </rewrite>
+    <defaultDocument>
+      <files>
+        <clear/>
+        <add value="Formulario.aspx"/>
+      </files>
+    </defaultDocument>
+  </system.webServer>
+
+  <system.codedom>
+    <compilers>
+      <compiler language="c#;cs;csharp" extension=".cs"
+        type="Microsoft.CodeDom.Providers.DotNetCompilerPlatform.CSharpCodeProvider, ..."
+        warningLevel="4"
+        compilerOptions="/langversion:default /nowarn:1659;1699;1701" />
+    </compilers>
+  </system.codedom>
+</configuration>
+```
+
+---
+
+## `<connectionStrings>`
+
+Esta cadena de conexión usa el prefijo `XpoProvider=MSSqlServer` y es consumida por el kit de inicio de **DevExpress XPO**. Es independiente de las cadenas definidas en `Misc/DbConnect.cs` que usa el resto de la aplicación.
+
+Actualiza `data source`, `user id` e `initial catalog` según tu entorno.
+
+<Note>
+  Los accesos a datos del DAL (todas las clases `DAL*.cs`) utilizan las cadenas definidas directamente en `DbConnect.cs`, **no** esta entrada de `Web.config`. Consulta la página [Configuración de la base de datos](/deployment/database-setup) para su configuración.
+</Note>
+
+---
+
+## `<system.web>`
+
+### `<compilation>`
+
+```xml
+<compilation debug="true" targetFramework="4.7.2" />
+```
+
+El atributo `debug="true"` genera símbolos de depuración y desactiva el tiempo de expiración de las peticiones. **Debe eliminarse o ponerse a `false` en producción**.
+
+El archivo `Web.Release.config` ya incluye la transformación correspondiente:
+
+```xml Web.Release.config
+<compilation xdt:Transform="RemoveAttributes(debug)" />
+```
+
+### `<customErrors>`
+
+```xml
+<customErrors mode="Off"/>
+```
+
+<Warning>
+  Con `mode="Off"`, las excepciones no controladas muestran el stack trace completo al cliente, incluyendo rutas de servidor, nombres de columnas SQL y detalles del código fuente. **Cambia esto a `RemoteOnly` o `On` en producción.**
+
+  ```xml
+  <customErrors mode="RemoteOnly" defaultRedirect="~/Error.aspx" />
+  ```
+</Warning>
+
+### `<machineKey>`
+
+```xml
+<machineKey
+  validation="SHA1"
+  decryption="AES"
+  validationKey="55B75A2EC1632818606EFF5DEBD9B6ED97624A26"
+  decryptionKey="BE928165D99AF384EED608443AD1B788A199CE83EAE0A9EEF23AD8C2C0F943EF" />
+```
+
+<Warning>
+  Las claves `validationKey` y `decryptionKey` que aparecen en el repositorio son **credenciales comprometidas**. Estas claves protegen el ViewState, las cookies de autenticación y los tokens anti-CSRF.
+
+  Genera claves nuevas para producción usando el generador de IIS o PowerShell:
+
+  ```powershell
+  # Genera una clave de 64 bytes para validationKey (128 hex chars)
+  -join (1..64 | ForEach-Object { '{0:X2}' -f (Get-Random -Maximum 256) })
+  ```
+
+  Cada entorno (desarrollo, staging, producción) debe tener sus propias claves únicas.
+</Warning>
+
+---
+
+## `<system.webServer>`
+
+### Reglas de URL Rewrite
+
+Requiere el módulo **URL Rewrite** instalado en IIS.
+
+| Regla | Función |
+|-------|---------|
+| `Force HTTPS` | Redirige permanentemente (301) todo el tráfico HTTP a HTTPS |
+| `SSL: https://consultoriadedatos.com` | Reescribe internamente cualquier ruta no existente como fichero o directorio hacia `Formulario.aspx` (SPA-style routing) |
+
+### `<defaultDocument>`
+
+```xml
+<defaultDocument>
+  <files>
+    <clear/>
+    <add value="Formulario.aspx"/>
+  </files>
+</defaultDocument>
+```
+
+Establece `Formulario.aspx` como documento predeterminado al acceder a la raíz del sitio.
+
+---
+
+## `<system.codedom>`
+
+Configura el compilador Roslyn (C# moderno) mediante el paquete `Microsoft.CodeDom.Providers.DotNetCompilerPlatform` v2.0.1. Esto permite el uso de características de C# 7.x en el código de servidor en tiempo de ejecución.
+
+No es necesario modificar esta sección.
+
+---
+
+## Resumen de cambios para producción
+
+<Tabs>
+  <Tab title="Desarrollo (actual)">
+    Configuración por defecto del repositorio:
+
+    ```xml
+    <compilation debug="true" targetFramework="4.7.2" />
+    <customErrors mode="Off"/>
+    <machineKey
+      validationKey="55B75A2EC1632818606EFF5DEBD9B6ED97624A26"
+      decryptionKey="BE928165D99AF384EED608443AD1B788A199CE83EAE0A9EEF23AD8C2C0F943EF" />
+    ```
+
+    - Errores detallados visibles para todos los clientes
+    - Símbolos de depuración activos
+    - Claves `machineKey` conocidas (comprometidas)
+  </Tab>
+  <Tab title="Producción (recomendado)">
+    Cambios mínimos obligatorios antes del despliegue:
+
+    ```xml
+    <!-- debug eliminado por la transformación de Web.Release.config -->
+    <compilation targetFramework="4.7.2" />
+
+    <!-- Ocultar errores a clientes remotos -->
+    <customErrors mode="RemoteOnly" defaultRedirect="~/Error.aspx" />
+
+    <!-- Claves únicas generadas para este entorno -->
+    <machineKey
+      validation="SHA1"
+      decryption="AES"
+      validationKey="<NUEVA_CLAVE_64_BYTES_HEX>"
+      decryptionKey="<NUEVA_CLAVE_32_BYTES_HEX>" />
+    ```
+
+    Aplica estas modificaciones mediante `Web.Release.config` o directamente sobre el `Web.config` desplegado (nunca en el repositorio).
+  </Tab>
+</Tabs>

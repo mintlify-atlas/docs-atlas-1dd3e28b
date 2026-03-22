@@ -1,0 +1,61 @@
+---
+title: "Prerrequisitos"
+description: "Requisitos de sistema y software necesarios para desplegar Consultoría Online."
+---
+
+Antes de desplegar Consultoría Online, asegúrate de que el servidor y el entorno de desarrollo cumplen todos los requisitos listados a continuación.
+
+## Infraestructura del servidor
+
+- [ ] **Windows Server** con IIS instalado y habilitado
+- [ ] **Módulo URL Rewrite para IIS** — necesario para las reglas de redirección HTTPS y reescritura de URL definidas en `Web.config`
+- [ ] **.NET Framework 4.7.2** instalado en el servidor
+- [ ] **SQL Server** (cualquier edición: Express, Standard, Enterprise) accesible vía TCP/IP en el puerto configurado (el ejemplo usa el puerto `28919`)
+- [ ] Acceso a un **servidor SMTP** para el envío de notificaciones por correo electrónico
+
+## Herramientas de compilación
+
+- [ ] **Visual Studio 2019 o 2022** (con la carga de trabajo "Desarrollo web ASP.NET"), o bien **MSBuild** standalone para compilación en CI/CD
+- [ ] **NuGet Package Restore** habilitado — los paquetes se restauran automáticamente antes de la compilación
+
+## Paquetes NuGet
+
+Los siguientes paquetes están declarados en `packages.config` y se restauran mediante NuGet:
+
+| Paquete | Versión | Uso |
+|---|---|---|
+| `HtmlAgilityPack` | 1.11.36 | Conversión de HTML a texto plano en los correos electrónicos |
+| `Microsoft.CodeDom.Providers.DotNetCompilerPlatform` | 2.0.1 | Compilador Roslyn para C# en tiempo de ejecución |
+
+Adicionalmente, los siguientes ensamblados se referencian directamente en el proyecto (como DLLs en el directorio raíz):
+
+| Ensamblado | Uso |
+|---|---|
+| `Newtonsoft.Json` | Serialización JSON para la integración con TurboSMTP API |
+| `RestSharp` | Cliente HTTP REST para la integración con TurboSMTP API |
+
+## DevExpress v19.1
+
+<Note>
+  DevExpress **no** se distribuye mediante NuGet en este proyecto. Los ensamblados se referencian directamente desde la instalación local. La aplicación utiliza los siguientes componentes de DevExpress v19.1:
+
+  - `DevExpress.XtraRichEdit.v19.1` — manipulación y fusión de documentos Word
+  - `DevExpress.XtraReports.v19.1` — generación del informe de diagnóstico
+  - `DevExpress.DataAccess.v19.1`, `DevExpress.Xpo.v19.1` — acceso a datos para el motor de informes
+  - `DevExpress.Printing.v19.1.Core`, `DevExpress.XtraPrinting.v19.1` — exportación a DOCX
+</Note>
+
+<Warning>
+  DevExpress requiere una **licencia de pago** activa. Asegúrate de que el servidor de producción dispone de una licencia válida para la versión 19.1. Sin licencia, la generación del informe Word fallará en tiempo de ejecución.
+</Warning>
+
+## Directorios con permisos de escritura
+
+El usuario de aplicación de IIS (normalmente `IIS_IUSRS` o la identidad del pool de aplicaciones) debe tener permisos de **escritura** sobre los siguientes directorios dentro de la raíz web:
+
+- [ ] `~/informes/` — los informes Word generados (`InformeN_timestamp.docx`) se guardan aquí
+- [ ] `~/logs/` — los archivos de log de sesión se crean y cierran aquí durante el ciclo de vida de cada cuestionario
+
+<Warning>
+  No uses las credenciales de base de datos, SMTP ni las claves de `machineKey` que aparecen en los archivos de configuración de ejemplo. Estas credenciales corresponden al entorno de desarrollo y deben reemplazarse antes de cualquier despliegue en producción.
+</Warning>

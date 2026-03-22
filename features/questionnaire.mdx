@@ -1,0 +1,125 @@
+---
+title: "Cuestionario de digitalización"
+description: "El flujo paso a paso del cuestionario adaptativo con repreguntas condicionales."
+---
+
+Tras el registro, el usuario completa un cuestionario de diagnóstico de digitalización. Las preguntas se cargan íntegramente en sesión al inicio y se recorren de forma secuencial. Algunas respuestas desencadenan **repreguntas** condicionales que se insertan automáticamente en el flujo.
+
+## Flujo del usuario
+
+<Steps>
+  <Step title="Pulsar '¡Empezar con el estudio!'">
+    El evento `butEmpezar_Click` carga todas las preguntas y respuestas posibles desde la base de datos y las almacena en la sesión:
+
+    ```csharp Formulario.aspx.cs
+    List<Pregunta> pregs = new DALPregunta().ObtenerPreguntas(
+        MySession.Current.IdModeloCuestionario);
+    MySession.Current.Preguntas = pregs;
+    MySession.Current.TotalPreguntas = pregs.Count;
+    MySession.Current.Respuestas = new DALRespuestaPosible()
+        .ObtenerRespuestasPosibles(MySession.Current.IdModeloCuestionario);
+
+    MostrarSiguientePregunta(0, false);
+    ```
+
+    `DALPregunta.ObtenerPreguntas` consulta las tablas `Pregunta` y `ApartadoPreguntas`, filtrando por el modelo de cuestionario y excluyendo las filas con `NoMostrar = 1`, ordenadas por `OrdenAparicion`.
+  </Step>
+
+  <Step title="Visualización de la pregunta actual">
+    `MostrarSiguientePregunta(int numPregParaMostrar, bool mostrarRepregunta)` configura los controles de respuesta y actualiza la barra de progreso. Si la pregunta tiene `RidPregunta1 != null` y `mostrarRepregunta == false`, se salta automáticamente a la siguiente posición.
+  </Step>
+
+  <Step title="El usuario responde y pulsa 'Pregunta siguiente'">
+    `butSiguiente_Click` recupera el índice de pregunta actual desde el atributo HTML `np` del botón y llama a `GuardarRespuestas`. Si la validación pasa (`podemosSeguir == true`), se avanza.
+  </Step>
+
+  <Step title="Guardado y detección de repreguntas">
+    `GuardarRespuestas(int numPregParaGuardar, out bool hayRepregunta)` recorre todos los controles de respuesta visibles. Si alguna respuesta seleccionada tiene `PermiteRepregunta == true`, establece `hayRepregunta = true`. Antes de guardar la primera respuesta de una pregunta, borra las respuestas previas con `BorrarAnteriorRespuesta`, evitando duplicados en reediciones.
+  </Step>
+
+  <Step title="Navegación hacia atrás">
+    El botón **&lt;&lt; Pregunta anterior** ejecuta `javascript:history.back()` en el cliente, sin postback al servidor. Esto permite navegar hacia atrás mediante la caché del navegador.
+  </Step>
+
+  <Step title="Última pregunta: finalización">
+    Cuando `numPregParaGuardar == TotalPreguntas - 1`, el sistema:
+
+    1. Lee los valores de perfil del usuario (nombre, teléfono, actividad, número de trabajadores) desde `DALRespuestaDelUsuario.LeerValoresUsuario`.
+    2. Actualiza la fila del usuario en base de datos con `DALUsuario.UpdateUsuario`.
+    3. Envía el correo de finalización al usuario (`MailType.finalized`).
+    4. Cierra el logger de sesión.
+    5. Envía el correo de resultados interno (`MailType.results`).
+    6. Muestra el panel `finalizadoMsg`.
+  </Step>
+</Steps>
+
+## Barra de progreso
+
+El porcentaje se calcula en la propiedad `PercentPregunta`, que lee el índice actual desde el atributo `np` del botón **Siguiente**:
+
+```csharp Formulario.aspx.cs
+public int PercentPregunta
+{
+    get
+    {
+        int numPreg = GetTagFromButton(butSiguiente);
+        return (numPreg) * 100 / MySession.Current.TotalPreguntas;
+    }
+}
+```
+
+El valor se inyecta directamente en el atributo `style` del elemento `<div class="progress-bar">` en el ASPX.
+
+## Repreguntas condicionales
+
+Una **repregunta** es una pregunta cuyo campo `RidPregunta1` apunta a la pregunta padre que la origina. El sistema las gestiona así:
+
+```csharp Formulario.aspx.cs
+private void MostrarSiguientePregunta(int numPregParaMostrar, bool mostrarRepregunta)
+{
+    Pregunta pregActual = MySession.Current.Preguntas[numPregParaMostrar];
+    if (pregActual.RidPregunta1 != null && !mostrarRepregunta)
+    {
+        // Es repregunta, pero no toca mostrarla: saltar
+        MostrarSiguientePregunta(numPregParaMostrar + 1, false);
+        return;
+    }
+    // ... renderizar la pregunta
+}
+```
+
+Y en `GuardarRespuestas`:
+
+```csharp Formulario.aspx.cs
+if (permiteRepregunta)
+    hayRepregunta = true;
+```
+
+Si la respuesta seleccionada tiene `PermiteRepregunta == true` en `RespuestaPosible`, la siguiente llamada a `MostrarSiguientePregunta` pasará `mostrarRepregunta = true`, mostrando la repregunta asociada.
+
+## Preguntas opcionales
+
+Si `Pregunta.EsOpcional == true`, `GuardarRespuestas` siempre devuelve `true` independientemente de si el usuario respondió algo:
+
+```csharp Formulario.aspx.cs
+if (pregActual.EsOpcional)
+    return true;
+else
+    return podemosSeguir;
+```
+
+## Actualización del perfil al finalizar
+
+```csharp Formulario.aspx.cs
+new DALRespuestaDelUsuario().LeerValoresUsuario(
+    MySession.Current.IdUsuario,
+    out string name, out string phone, out string numWorkers, out string actividad);
+new DALUsuario().UpdateUsuario(
+    MySession.Current.IdUsuario, name, phone, numWorkers, actividad);
+```
+
+`LeerValoresUsuario` identifica las respuestas de perfil mediante el campo `SysTokenCode` de la tabla `Pregunta` (`NAME`, `PHONE`, `ACTIVITY`, `NUMWORKERS`).
+
+<Note>
+  Todo el estado del cuestionario (lista de preguntas, respuestas posibles, índice actual) vive en `MySession.Current`, que a su vez se serializa en `HttpSessionState`. Si la sesión expira durante el cuestionario, el usuario debe volver a registrarse. Las respuestas ya guardadas en base de datos no se pierden, pero la navegación se reiniciará desde el principio.
+</Note>

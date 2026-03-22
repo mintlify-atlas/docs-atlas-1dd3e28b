@@ -1,0 +1,198 @@
+---
+title: "Preguntas frecuentes"
+description: "Respuestas a las preguntas más comunes sobre Consultoría Online."
+---
+
+<AccordionGroup>
+
+  <Accordion title="¿Por qué el formulario vuelve al principio al recargar la página?">
+    La sesión ASP.NET almacena el identificador de usuario activo en `MySession.Current.IdUsuario`. Cuando la sesión expira (el tiempo de espera predeterminado de ASP.NET es 20 minutos de inactividad), ese valor se resetea a `0`.
+
+    En `Page_Load`, el código comprueba este valor:
+
+    ```csharp csharp
+    if (MySession.Current.IdUsuario == 0)
+    {
+        registrationForm.Visible = true;
+        itemForm.Visible = false;
+        finalizadoMsg.Visible = false;
+    }
+    ```
+
+    Cuando `IdUsuario` es `0`, el formulario de registro vuelve a mostrarse, independientemente de cuántas preguntas hubiera respondido el usuario anteriormente.
+
+    <Warning>
+    Si el usuario recarga la página después de que la sesión haya expirado, todas las respuestas guardadas en base de datos se conservan, pero el flujo de navegación del cuestionario se reinicia desde cero.
+    </Warning>
+
+    Para ampliar el tiempo de sesión, modifique el atributo `timeout` en `Web.config`:
+
+    ```xml xml
+    <system.web>
+      <sessionState timeout="60" />
+    </system.web>
+    ```
+  </Accordion>
+
+  <Accordion title="¿Puedo añadir un nuevo modelo de cuestionario?">
+    Sí. El proceso requiere cambios tanto en base de datos como en código:
+
+    1. Inserte un nuevo registro en la tabla `ModeloCuestionario`.
+    2. Cree las secciones en `ApartadoPreguntas`, referenciando el nuevo `IdModeloCuestionario`.
+    3. Añada las preguntas en la tabla `Pregunta` con el `RIdApartadoPreguntas1` correcto y `NoMostrar = 0`.
+    4. Añada las opciones de respuesta en `RespuestaPosible` para cada pregunta.
+    5. Actualice el identificador hardcodeado en `registarUsuario_Click` (`Formulario.aspx.cs`):
+
+    ```csharp csharp
+    // Línea actual:
+    int modelo = 9;
+
+    // Cámbiela al nuevo IdModeloCuestionario:
+    int modelo = 10; // o el valor que corresponda
+    ```
+
+    <Tip>
+    Si la aplicación debe soportar múltiples modelos simultáneamente (por ejemplo, seleccionados por URL o perfil de cliente), el valor del modelo debería leerse desde configuración o desde un parámetro de la petición en lugar de estar hardcodeado.
+    </Tip>
+  </Accordion>
+
+  <Accordion title="¿Por qué el botón 'Anterior' no restaura la respuesta anterior?">
+    El botón «Anterior» usa navegación del lado del cliente:
+
+    ```csharp csharp
+    butAnterior.Attributes.Add("onClick", "javascript:history.back(); return false;");
+    ```
+
+    Esto navega en el historial del navegador sin realizar un postback al servidor. La respuesta previa **ya fue guardada** en base de datos cuando el usuario pulsó «Siguiente» en aquel paso: primero se llamó a `BorrarAnteriorRespuesta` y después a `NuevaRespuesta`.
+
+    Al volver con `history.back()`, la página del navegador se restaura desde su caché, pero si el servidor ha cambiado de estado (por ejemplo, la sesión ha cambiado o el navegador no tiene caché de la página), los controles pueden aparecer vacíos.
+
+    <Note>
+    La respuesta ya guardada en base de datos no se pierde. Sin embargo, los controles visuales de la página pueden no reflejar la selección anterior.
+    </Note>
+  </Accordion>
+
+  <Accordion title="¿Cómo se activan las repreguntas?">
+    Una repregunta es una `Pregunta` cuyo campo `RidPregunta1` apunta a otra pregunta «padre». El mecanismo funciona así:
+
+    1. Al cargar las opciones de una pregunta, `MostrarSiguientePregunta` lee la propiedad `PermiteRepregunta` de cada `RespuestaPosible`.
+    2. Si el usuario selecciona una opción con `PermiteRepregunta = true`, la función `GuardarRespuestas` activa `hayRepregunta = true`.
+    3. En el siguiente paso, `MostrarSiguientePregunta` comprueba si la pregunta candidata tiene `RidPregunta1 != null`:
+       - Si `hayRepregunta` es `true`, **se muestra** la repregunta.
+       - Si `hayRepregunta` es `false`, la repregunta **se omite** y se avanza a la siguiente.
+
+    ```csharp csharp
+    // MostrarSiguientePregunta — Formulario.aspx.cs
+    if (pregActual.RidPregunta1 != null && !mostrarRepregunta)
+    {
+        // Es repregunta, pero no toca mostrarla ahora
+        MostrarSiguientePregunta(numPregParaMostrar + 1, false);
+        return;
+    }
+    ```
+  </Accordion>
+
+  <Accordion title="¿Qué pasa si el usuario no responde a una pregunta opcional?">
+    Las preguntas con `EsOpcional = true` permiten siempre avanzar al siguiente paso, independientemente de si el usuario ha introducido algún valor.
+
+    Al final de `GuardarRespuestas`:
+
+    ```csharp csharp
+    if (pregActual.EsOpcional)
+    {
+        return true; // podemos seguir sin respuesta
+    }
+    else
+    {
+        return podemosSeguir; // depende de si se marcó algo
+    }
+    ```
+
+    No se guarda ninguna fila en `RespuestaDelUsuario` si el usuario no interacciona con los controles.
+
+    <Note>
+    Si el usuario pulsa «Siguiente» sin responder, `BorrarAnteriorRespuesta` se llama igualmente (en la siguiente navegación), lo que elimina cualquier respuesta que hubiera guardado antes para esa misma pregunta.
+    </Note>
+  </Accordion>
+
+  <Accordion title="¿Cómo cambio el servidor SMTP?">
+    La configuración del servidor SMTP está definida directamente en el método `EnviarMail` dentro de `Formulario.aspx.cs`:
+
+    ```csharp csharp
+    SmtpClient smtpSender = new SmtpClient();
+    smtpSender.Host = "uk.scriptmail.yourwebservers.com";
+    smtpSender.Credentials = new System.Net.NetworkCredential(
+        "consultoriadedatos.com@script.mail", "contraseña");
+    smtpSender.Port = 25;
+    smtpSender.EnableSsl = true;
+    ```
+
+    Para cambiarlo, modifique los valores de `Host`, `Credentials` y `Port` en ese método.
+
+    <Tip>
+    Se recomienda externalizar esta configuración a `Web.config` para no tener credenciales en el código fuente:
+
+    ```xml xml
+    <system.net>
+      <mailSettings>
+        <smtp deliveryMethod="Network">
+          <network
+            host="smtp.example.com"
+            port="587"
+            userName="usuario@example.com"
+            password="contraseña"
+            enableSsl="true" />
+        </smtp>
+      </mailSettings>
+    </system.net>
+    ```
+
+    Con esta configuración, `new SmtpClient()` tomará automáticamente los valores de `Web.config` sin necesidad de asignarlos en código.
+    </Tip>
+  </Accordion>
+
+  <Accordion title="¿Dónde se guardan los informes generados?">
+    Los informes en formato `.docx` se guardan en el directorio `~/informes/` del servidor web. El nombre de archivo sigue el patrón:
+
+    ```
+    Informe{IdUsuario}_{ddMMyyyyHHmmss}.docx
+    ```
+
+    Por ejemplo: `Informe42_15032024143022.docx`.
+
+    El directorio se crea automáticamente si no existe:
+
+    ```csharp csharp
+    // GenerateInforme — Formulario.aspx.cs
+    DirectoryInfo di = Directory.CreateDirectory(Path.GetDirectoryName(destFile));
+    ```
+
+    El proceso de generación usa `InformeWeb.ReportQuery` (un componente DevExpress) para producir el informe y `RichEditDocumentServer` para fusionarlo con la plantilla `~/informes/Template.docx`.
+
+    <Note>
+    La generación del informe solo se activa para determinados correos electrónicos (comprobación en `EnviarMail`). El resto de usuarios recibe únicamente un correo de confirmación sin adjunto.
+    </Note>
+  </Accordion>
+
+  <Accordion title="¿Por qué MaxItems está limitado a 7?">
+    El marcado ASPX define exactamente 7 conjuntos de controles con nombres fijos:
+
+    - `RadioRespuesta1` … `RadioRespuesta7`
+    - `CheckRespuesta1` … `CheckRespuesta7`
+    - `TextBoxRespuesta1` … `TextBoxRespuesta7`
+    - `LabelRespuesta1` … `LabelRespuesta7`
+
+    El método `GetControl()` en `Formulario.aspx.cs` resuelve estos nombres mediante un `switch` estático. El campo estático `MaxItems = 7` refleja ese límite:
+
+    ```csharp csharp
+    public static int MaxItems = 7;
+    ```
+
+    Si una pregunta en base de datos tiene más de 7 respuestas posibles, las opciones adicionales se ignorarán silenciosamente (el bucle en `MostrarSiguientePregunta` simplemente no tendrá controles donde mostrarlas).
+
+    <Warning>
+    Para soportar más de 7 opciones por pregunta, es necesario añadir los controles correspondientes al archivo `.aspx` **y** ampliar el `switch` en `GetControl()`. Ambos cambios deben hacerse de forma coordinada.
+    </Warning>
+  </Accordion>
+
+</AccordionGroup>

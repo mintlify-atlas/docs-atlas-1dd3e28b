@@ -1,0 +1,133 @@
+---
+title: "RespuestaPosible"
+description: "Clase de dominio que representa una respuesta posible para una pregunta."
+---
+
+## Class definition
+
+```csharp Classes/RespuestaPosible.cs
+namespace ConsultoriaOnline
+{
+    public class RespuestaPosible
+    {
+        private int idRespuestaPosible;
+        private string textoRespuesta;
+        private int? ridPregunta1;
+        private bool tieneTexto;
+        private bool permiteRepregunta;
+
+        public int IdRespuestaPosible { get => idRespuestaPosible; set => idRespuestaPosible = value; }
+        public string TextoRespuesta { get => textoRespuesta; set => textoRespuesta = value; }
+        public int? RidPregunta1 { get => ridPregunta1; set => ridPregunta1 = value; }
+        public bool TieneTexto { get => tieneTexto; set => tieneTexto = value; }
+        public bool PermiteRepregunta { get => permiteRepregunta; set => permiteRepregunta = value; }
+    }
+}
+```
+
+## Properties
+
+<ResponseField name="IdRespuestaPosible" type="int" required>
+  Primary key. Also stored as the `nr` attribute on the corresponding `LabelRespuesta` control
+  so it can be retrieved during answer saving without a round-trip to the database.
+</ResponseField>
+
+<ResponseField name="TextoRespuesta" type="string" required>
+  The answer text shown to the user next to the radio button, checkbox, or as a TextBox
+  placeholder depending on the question type.
+</ResponseField>
+
+<ResponseField name="RidPregunta1" type="int?">
+  Foreign key to the parent `Pregunta`. Used to filter the full list of possible answers down
+  to those that belong to the currently displayed question:
+
+  ```csharp Formulario.aspx.cs
+  var estasRespuestas = MySession.Current.Respuestas
+      .Where(x => x.RidPregunta1 == pregActual.IdPregunta);
+  ```
+</ResponseField>
+
+<ResponseField name="TieneTexto" type="bool" required>
+  When `true`, a free-text `TextBox` is rendered alongside the radio button or checkbox option.
+  This allows users to enter custom text for an "Other" style answer. Stored as the `no`
+  attribute on the `LabelRespuesta` control.
+</ResponseField>
+
+<ResponseField name="PermiteRepregunta" type="bool" required>
+  When `true` and this option is selected, `GuardarRespuestas` sets `hayRepregunta = true`,
+  which causes the next question to be shown even if it is a re-question (`RidPregunta1 != null`).
+  Stored as the `rep` attribute on the `LabelRespuesta` control.
+</ResponseField>
+
+## Loading possible answers
+
+All possible answers for a questionnaire model are loaded once at session start and stored in
+`MySession.Current.Respuestas`. The DAL query joins through `Pregunta` and `ApartadoPreguntas`
+to scope results to the active model and exclude hidden questions:
+
+```csharp DAL/DALRespuestaPosible.cs
+SELECT r.* FROM RespuestaPosible r
+INNER JOIN Pregunta p
+    ON r.RIdPregunta1 = p.IdPregunta
+INNER JOIN ApartadoPreguntas a
+    ON a.IdApartadoPreguntas = p.RIdApartadoPreguntas1
+WHERE a.RIdModeloCuestionario1 = {0}
+  AND p.NoMostrar = 0
+```
+
+## StoreValuesInLabel mechanism
+
+To avoid repeated database lookups during form postbacks, three properties of each
+`RespuestaPosible` are serialized as HTML attributes on the corresponding `LabelRespuesta`
+ASP.NET control at render time:
+
+```csharp Formulario.aspx.cs
+public void StoreValuesInLabel(int i, int idResp, bool tieneTexto, bool permiteRepreg)
+{
+    Label label = Labels(i);
+    SetTagInLabel(label, "nr",  idResp);
+    SetTagInLabel(label, "no",  tieneTexto   ? 1 : 0);
+    SetTagInLabel(label, "rep", permiteRepreg ? 1 : 0);
+}
+```
+
+During `GuardarRespuestas`, the values are read back:
+
+```csharp Formulario.aspx.cs
+public void GetValuesFromLabel(int i, out int idResp, out bool tieneTexto, out bool permiteRepreg)
+{
+    Label label = Labels(i);
+    idResp        = GetTagFromLabel(label, "nr");
+    tieneTexto    = GetTagFromLabel(label, "no")  == 1;
+    permiteRepreg = GetTagFromLabel(label, "rep") == 1;
+}
+```
+
+| HTML attribute | Property           | Type |
+|----------------|--------------------|------|
+| `nr`           | `IdRespuestaPosible` | `int` |
+| `no`           | `TieneTexto`       | `bool` (0/1) |
+| `rep`          | `PermiteRepregunta` | `bool` (0/1) |
+
+## Re-question trigger
+
+`PermiteRepregunta` drives the re-question flow. When a user selects an option that has this
+flag set, `GuardarRespuestas` signals the caller:
+
+```csharp Formulario.aspx.cs
+if (saveAnswer)
+{
+    podemosSeguir = true;
+    if (permiteRepregunta)
+        hayRepregunta = true;
+    // ...
+}
+```
+
+The `hayRepregunta` flag is then passed as `mostrarRepregunta` to `MostrarSiguientePregunta`,
+allowing the next re-question to be displayed instead of skipped.
+
+<Tip>
+  A single question can have up to `MaxItems` (7) possible answers, matching the maximum number
+  of item slots pre-declared in the ASPX markup.
+</Tip>

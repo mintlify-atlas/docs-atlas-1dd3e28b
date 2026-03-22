@@ -1,0 +1,177 @@
+---
+title: "Gestión de sesión"
+description: "Cómo MySession gestiona el estado del usuario durante el cuestionario."
+---
+
+`MySession` es una clase que encapsula todo el estado de la sesión del usuario activo. Se almacena como un único objeto serializado dentro de la sesión HTTP nativa de ASP.NET, bajo la clave `__MySession__`.
+
+<Note>
+  ASP.NET Web Forms utiliza sesiones basadas en cookies (o URL si las cookies están deshabilitadas). `MySession` no es un singleton a nivel de proceso; cada usuario tiene su propia instancia almacenada en su sesión HTTP. La palabra "singleton" hace referencia al patrón de acceso: una única instancia por sesión, accesible desde cualquier punto del código con `MySession.Current`.
+</Note>
+
+---
+
+## Código fuente de `MySession.cs`
+
+```csharp
+public class MySession
+{
+    // Constructor privado — los valores por defecto inicializan la sesión
+    private MySession()
+    {
+        IdUsuario = 0;
+        IdModeloCuestionario = 1;
+        Email = "";
+    }
+
+    // Acceso global a la sesión actual
+    public static MySession Current
+    {
+        get
+        {
+            MySession session =
+              (MySession)HttpContext.Current.Session["__MySession__"];
+            if (session == null)
+            {
+                session = new MySession();
+                HttpContext.Current.Session["__MySession__"] = session;
+            }
+            return session;
+        }
+    }
+
+    public int    IdModeloCuestionario { get; set; }
+    public string Email                { get; set; }
+    public int    IdUsuario            { get; set; }
+    public int    TotalPreguntas       { get; set; }
+    public List<Pregunta>          Preguntas  { get; set; }
+    public List<RespuestaPosible>  Respuestas { get; set; }
+    public string LogFile              { get; set; }
+
+    private StreamWriter _Logger = null;
+    public StreamWriter Logger
+    {
+        get
+        {
+            if (_Logger == null)
+            {
+                LogFile = HttpContext.Current.Server.MapPath(
+                    String.Format("~/logs/Log{1}_{0}.txt",
+                                  IdUsuario,
+                                  DateTime.Now.ToString("ddMMyyyyHHmmss")));
+                Directory.CreateDirectory(Path.GetDirectoryName(LogFile));
+                _Logger = File.AppendText(LogFile);
+            }
+            return _Logger;
+        }
+    }
+}
+```
+
+---
+
+## Propiedades de sesión
+
+<CardGroup cols={2}>
+  <Card title="IdUsuario" icon="user">
+    `int` — Identificador del usuario en la base de datos. El valor `0` indica que el usuario aún no se ha registrado. Se establece a un valor positivo en `registarUsuario_Click` tras el `INSERT` exitoso en la tabla `Usuario`.
+  </Card>
+  <Card title="IdModeloCuestionario" icon="list-check">
+    `int` — Modelo de cuestionario asignado. Valor por defecto: `1`. Se actualiza a `9` en el momento del registro del usuario.
+  </Card>
+  <Card title="Email" icon="envelope">
+    `string` — Correo electrónico capturado en el formulario de registro inicial. Se usa como destinatario de los correos de confirmación y finalización.
+  </Card>
+  <Card title="TotalPreguntas" icon="hashtag">
+    `int` — Número total de preguntas activas del modelo. Se asigna en `butEmpezar_Click` tras cargar la lista de preguntas desde la base de datos. Se usa para calcular el porcentaje de progreso y detectar la última pregunta.
+  </Card>
+  <Card title="Preguntas" icon="circle-question">
+    `List<Pregunta>` — Lista completa de preguntas del cuestionario, cargada una sola vez al pulsar "Empezar". Incluye todas las preguntas activas (`NoMostrar = false`) ordenadas por `OrdenAparicion`.
+  </Card>
+  <Card title="Respuestas" icon="check-to-slot">
+    `List<RespuestaPosible>` — Lista completa de respuestas posibles para todas las preguntas del modelo, cargada junto con `Preguntas`. La UI filtra en memoria las opciones de cada pregunta con LINQ: `Respuestas.Where(x => x.RidPregunta1 == pregActual.IdPregunta)`.
+  </Card>
+  <Card title="LogFile" icon="file-lines">
+    `string` — Ruta física al fichero de log de la sesión. Se construye al inicializar el `Logger` con el patrón `~/logs/Log{ddMMyyyyHHmmss}_{IdUsuario}.txt`. Se adjunta al correo interno de resultados al finalizar.
+  </Card>
+  <Card title="Logger" icon="pen-to-square">
+    `StreamWriter` — Escritor de log de la sesión. Se inicializa de forma perezosa (lazy) la primera vez que se accede. Crea el directorio `~/logs/` si no existe. Se cierra explícitamente al terminar el cuestionario.
+  </Card>
+</CardGroup>
+
+---
+
+## Ciclo de vida de la sesión
+
+<Steps>
+  <Step title="Primera petición — sesión vacía">
+    Cuando un navegador accede por primera vez a `Formulario.aspx`, `HttpContext.Current.Session["__MySession__"]` devuelve `null`. El accessor `MySession.Current` crea una nueva instancia con `IdUsuario = 0`, `IdModeloCuestionario = 1` y `Email = ""`.
+  </Step>
+  <Step title="Registro del usuario">
+    Al enviar el formulario de registro, `registarUsuario_Click` llama a `DALUsuario.NuevoUsuario()`, obtiene el `IdUsuario` generado y lo asigna a `MySession.Current.IdUsuario`. También fija `IdModeloCuestionario = 9` y `Email`. A partir de este momento `IdUsuario != 0`.
+  </Step>
+  <Step title="Inicio del cuestionario">
+    Al pulsar "Empezar", `butEmpezar_Click` carga en sesión todas las preguntas (`Preguntas`) y todas las respuestas posibles (`Respuestas`) del modelo. `TotalPreguntas` se establece con el recuento. El `Logger` se inicializa implícitamente en la primera llamada a `LogMessage()`.
+  </Step>
+  <Step title="Navegación pregunta a pregunta">
+    Cada clic en "Siguiente" llama a `butSiguiente_Click`, que:
+    1. Comprueba que `IdUsuario != 0`; si es `0`, fuerza la vuelta al formulario de registro.
+    2. Lee el número de pregunta actual del atributo `np` del botón.
+    3. Guarda las respuestas en la BD y determina si avanzar o mostrar una re-pregunta.
+    4. La sesión en memoria sirve como caché de preguntas y respuestas — no hay consultas adicionales a la BD durante la navegación.
+  </Step>
+  <Step title="Finalización">
+    Al responder la última pregunta (`numPregParaGuardar == TotalPreguntas - 1`):
+    1. Se leen los valores especiales (`NAME`, `PHONE`, etc.) con `LeerValoresUsuario()`.
+    2. Se actualiza la ficha del usuario con `UpdateUsuario()`.
+    3. Se envían los correos de finalización y resultados.
+    4. **`MySession.Current.Logger.Close()`** cierra y libera el fichero de log.
+    5. Los paneles `itemForm` y `finalizadoMsg` se intercambian.
+  </Step>
+  <Step title="Expiración">
+    La sesión expira por el timeout estándar de ASP.NET (por defecto 20 minutos de inactividad). No hay lógica de destrucción explícita de `MySession`; IIS libera el objeto de sesión completo.
+  </Step>
+</Steps>
+
+---
+
+## Validación de sesión en `butSiguiente_Click`
+
+Antes de guardar cualquier respuesta, el código comprueba que la sesión tenga un usuario válido:
+
+```csharp
+protected void butSiguiente_Click(object sender, EventArgs e)
+{
+    // Guardia de sesión: si el usuario no está registrado, volver al inicio
+    if (MySession.Current.IdUsuario == 0)
+    {
+        LogMessage(">> 'Siguiente' con IdUsario=0");
+        registrationForm.Visible = true;
+        registradoMsg.Visible    = false;
+        itemForm.Visible         = false;
+        finalizadoMsg.Visible    = false;
+        return;
+    }
+    // ... continúa con GuardarRespuestas()
+}
+```
+
+Este mismo patrón se aplica al inicio de `GuardarRespuestas()`:
+
+```csharp
+public bool GuardarRespuestas(int numPregParaGuardar, out bool hayRepregunta)
+{
+    hayRepregunta = false;
+    if (MySession.Current.IdUsuario == 0)
+        return false;
+    // ...
+}
+```
+
+<Warning>
+  Si la sesión ASP.NET expira mientras el usuario está respondiendo el cuestionario (inactividad superior al timeout configurado en IIS, por defecto 20 minutos), `MySession.Current` creará una nueva instancia con `IdUsuario = 0`. El siguiente postback del usuario será redirigido al formulario de registro, perdiendo el progreso no guardado. Las respuestas ya persistidas en `RespuestaDelUsuario` no se pierden, pero el usuario no podrá continuar desde donde lo dejó sin registrarse de nuevo.
+</Warning>
+
+<Note>
+  `MySession` no implementa ningún mecanismo de sincronización de hilos. En un entorno con múltiples peticiones concurrentes del mismo usuario (p. ej., doble clic rápido en "Siguiente"), podrían producirse condiciones de carrera sobre las propiedades de sesión. ASP.NET bloquea el acceso concurrente a la sesión por defecto cuando se usa la sesión en modo `InProc`, por lo que esto no debería ser un problema en la configuración estándar, pero conviene tenerlo en cuenta si se cambia el proveedor de sesión.
+</Note>

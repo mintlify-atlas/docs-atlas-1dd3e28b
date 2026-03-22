@@ -1,0 +1,80 @@
+---
+title: "DALRespuestaPosible"
+description: "Acceso a datos para las respuestas posibles de cada pregunta."
+---
+
+`DALRespuestaPosible` carga de base de datos todas las opciones de respuesta disponibles para un modelo de cuestionario. Se encuentra en `DAL/DALRespuestaPosible.cs`.
+
+## Constructor
+
+Crea una instancia de `DbConnect` que abre la conexión SQL Server.
+
+```csharp csharp
+public DALRespuestaPosible()
+{
+    MainCnx = new DbConnect();
+}
+```
+
+## Métodos
+
+### ObtenerRespuestasPosibles
+
+Devuelve todas las respuestas posibles de todas las preguntas visibles de un modelo de cuestionario. El resultado completo se guarda en sesión al inicio del cuestionario y se filtra por pregunta en memoria mediante LINQ.
+
+<ParamField path="idModeloCuestionario" type="int" required>
+  Identificador del modelo de cuestionario. Filtra indirectamente a través de `ApartadoPreguntas` y `Pregunta`.
+</ParamField>
+
+**Devuelve:** `List<RespuestaPosible>`, o `null` si se produce una excepción.
+
+#### SQL ejecutado
+
+```sql sql
+SELECT r.*
+FROM RespuestaPosible r
+INNER JOIN Pregunta p
+    ON r.RIdPregunta1 = p.IdPregunta
+INNER JOIN ApartadoPreguntas a
+    ON a.IdApartadoPreguntas = p.RIdApartadoPreguntas1
+WHERE a.RIdModeloCuestionario1 = {idModeloCuestionario}
+  AND p.NoMostrar = 0
+```
+
+#### Mapeo de columnas
+
+| Columna DB | Propiedad C# | Tipo .NET | Nullable |
+|---|---|---|---|
+| `IdRespuestaPosible` | `IdRespuestaPosible` | `int` | No |
+| `TextoRespuesta` | `TextoRespuesta` | `string` | No |
+| `RidPregunta1` | `RidPregunta1` | `int?` | Sí |
+| `TieneTexto` | `TieneTexto` | `bool` | No |
+| `PermiteRepregunta` | `PermiteRepregunta` | `bool` | No |
+
+## Carga en sesión y filtrado por pregunta
+
+Al pulsar el botón «Empezar», se cargan **todas** las respuestas posibles del cuestionario en una única consulta y se almacenan en `MySession.Current.Respuestas`:
+
+```csharp csharp
+// butEmpezar_Click — Formulario.aspx.cs
+MySession.Current.Respuestas = new DALRespuestaPosible()
+    .ObtenerRespuestasPosibles(MySession.Current.IdModeloCuestionario);
+```
+
+Esta estrategia de carga única evita una consulta a base de datos por cada pregunta durante la navegación del cuestionario.
+
+Cuando se muestra una pregunta, `MostrarSiguientePregunta` filtra la lista en memoria usando LINQ para obtener solo las opciones de la pregunta actual:
+
+```csharp csharp
+// MostrarSiguientePregunta — Formulario.aspx.cs
+var estasRespuestas = MySession.Current.Respuestas
+    .Where(x => x.RidPregunta1 == pregActual.IdPregunta);
+```
+
+<Note>
+El campo `PermiteRepregunta` determina si la selección de esa opción activa una repregunta en el paso siguiente. Si al menos una de las opciones marcadas tiene `PermiteRepregunta = true`, la variable `hayRepregunta` pasa a `true` y la siguiente pregunta con `RidPregunta1` apuntando a la actual se muestra en lugar de omitirse.
+</Note>
+
+<Tip>
+El campo `TieneTexto` indica que la opción incluye un campo de texto libre adicional (por ejemplo, «Otro: ___»). Al guardar, `ValorRespuesta` recoge ese texto y `EsSoloTexto` queda como `false` porque sí hay una opción base seleccionada.
+</Tip>

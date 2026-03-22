@@ -1,0 +1,149 @@
+---
+title: "Tipos de respuesta"
+description: "Los cinco tipos de respuesta soportados por el cuestionario y cómo se renderizan."
+---
+
+El cuestionario soporta cinco tipos de respuesta definidos en el enum `TipoRespuesta`. El tipo de cada pregunta se almacena en el campo `RIdTipoRespuesta1` de la tabla `Pregunta` y determina qué controles ASP.NET se renderizan.
+
+```csharp Formulario.aspx.cs
+public enum TipoRespuesta { text = 1, num = 2, radio = 3, check = 4, memo = 5 };
+```
+
+El límite de opciones por pregunta es **7** (`MaxItems = 7`). La página declara exactamente 7 instancias de cada control (`RadioRespuesta1`…`RadioRespuesta7`, etc.) que se muestran u ocultan según el número de respuestas posibles de la pregunta actual.
+
+## Switch de renderizado
+
+El siguiente bloque de `MostrarSiguientePregunta` muestra cómo se selecciona el control para cada tipo:
+
+```csharp Formulario.aspx.cs
+switch ((TipoRespuesta)pregActual.RidTipoRespuesta1)
+{
+    case TipoRespuesta.text:
+        ShowLabel(i, resp.TextoRespuesta);
+        ShowTextBox(i, 32, 200, TextBoxMode.SingleLine, "");
+        break;
+
+    case TipoRespuesta.num:
+        ShowLabel(i, resp.TextoRespuesta);
+        ShowTextBox(i, 32, 60, TextBoxMode.SingleLine, "");
+        break;
+
+    case TipoRespuesta.memo:
+        ShowTextBox(i, 180, 500, TextBoxMode.MultiLine, resp.TextoRespuesta);
+        break;
+
+    case TipoRespuesta.radio:
+        TextoDeAyuda.Text = @"<h6 style=""color: grey;"">(marque una de las opciones)</h6><br>";
+        RadioButtons(i).Text = "&nbsp;" + resp.TextoRespuesta;
+        RadioButtons(i).Visible = true;
+        if (resp.TieneTexto == true)
+            ShowTextBox(i, 32, 120, TextBoxMode.SingleLine, "");
+        break;
+
+    case TipoRespuesta.check:
+        TextoDeAyuda.Text = @"<h6 style=""color: grey;"">(marque una o varias opciones - todas las que correspondan)</h6><br>";
+        CheckBoxs(i).Text = "&nbsp;" + resp.TextoRespuesta;
+        CheckBoxs(i).Visible = true;
+        if (resp.TieneTexto == true)
+            ShowTextBox(i, 32, 120, TextBoxMode.SingleLine, "");
+        break;
+}
+```
+
+Si la pregunta define un `TextoDeAyuda` propio en base de datos, este sobreescribe el texto de ayuda por defecto del tipo.
+
+## Descripción de cada tipo
+
+<AccordionGroup>
+  <Accordion title="text (valor = 1) — Texto libre de una línea">
+    Renderiza un `Label` con el texto de la respuesta y un `TextBox` en modo `SingleLine`.
+
+    | Propiedad | Valor |
+    |-----------|-------|
+    | Alto      | 32 px |
+    | Ancho     | 200 px |
+    | Modo      | `SingleLine` |
+
+    **Validación:** `saveAnswer` se activa si `TextBoxs(i).Text != ""`. El campo es obligatorio salvo que `EsOpcional == true`.
+
+    ```csharp
+    saveAnswer |= pregActual.RidTipoRespuesta1 == (int)TipoRespuesta.text
+                  && TextBoxs(i).Text != "";
+    ```
+  </Accordion>
+
+  <Accordion title="num (valor = 2) — Entrada numérica">
+    Renderiza un `Label` y un `TextBox` estrecho en modo `SingleLine`. El valor se valida con `Int32.TryParse` para garantizar que sea un entero.
+
+    | Propiedad | Valor |
+    |-----------|-------|
+    | Alto      | 32 px |
+    | Ancho     | 60 px |
+    | Modo      | `SingleLine` |
+
+    **Validación:** El campo debe contener un valor no vacío parseable como entero de 32 bits.
+
+    ```csharp
+    saveAnswer |= pregActual.RidTipoRespuesta1 == (int)TipoRespuesta.num
+                  && TextBoxs(i).Text != ""
+                  && Int32.TryParse(TextBoxs(i).Text, out resParse);
+    ```
+  </Accordion>
+
+  <Accordion title="radio (valor = 3) — Selección única">
+    Renderiza un grupo de controles `RadioButton` con `GroupName="radius"`, uno por cada `RespuestaPosible` de la pregunta (máximo 7). Se muestra el texto de ayuda: *"(marque una de las opciones)"*.
+
+    **`TieneTexto`:** Si `RespuestaPosible.TieneTexto == true`, se añade un `TextBox` adicional (32 × 120 px) junto al radio button, permitiendo capturar un valor libre complementario (p. ej. la opción "Otro: ___").
+
+    **`PermiteRepregunta`:** Si el radio button con `PermiteRepregunta == true` queda seleccionado, el motor activa la repregunta condicional asociada.
+
+    **Validación:** Al menos un `RadioButton` debe estar marcado. Si ese radio tiene `TieneTexto == true`, el `TextBox` acompañante también debe contener texto.
+
+    ```csharp
+    if (pregActual.RidTipoRespuesta1 == (int)TipoRespuesta.radio
+        && RadioButtons(i).Checked == true)
+    {
+        if (!tieneOtros || TextBoxs(i).Text != "")
+            saveAnswer |= true;
+    }
+    ```
+  </Accordion>
+
+  <Accordion title="check (valor = 4) — Selección múltiple">
+    Renderiza un grupo de `CheckBox`, uno por opción (máximo 7). Se muestra el texto de ayuda: *"(marque una o varias opciones - todas las que correspondan)"*.
+
+    Funciona igual que `radio` en cuanto a `TieneTexto` y `PermiteRepregunta`, pero permite marcar **varias opciones simultáneamente**. Cada opción marcada genera una fila independiente en `RespuestaDelUsuario`.
+
+    **Validación:** Al menos un `CheckBox` debe estar marcado (con su `TextBox` relleno si `TieneTexto == true`).
+  </Accordion>
+
+  <Accordion title="memo (valor = 5) — Texto libre multilínea">
+    Renderiza un único `TextBox` en modo `MultiLine`. El texto de la respuesta posible se usa como placeholder.
+
+    | Propiedad | Valor |
+    |-----------|-------|
+    | Alto      | 180 px |
+    | Ancho     | 500 px |
+    | Modo      | `MultiLine` |
+
+    **Validación:** El campo puede guardarse **vacío**. La condición `saveAnswer` se activa incondicionalmente para este tipo:
+
+    ```csharp
+    saveAnswer |= pregActual.RidTipoRespuesta1 == (int)TipoRespuesta.memo;
+    // podemos guardar SIN comentarios
+    ```
+  </Accordion>
+</AccordionGroup>
+
+## `TextoDeAyuda` — texto de ayuda personalizado
+
+Cada pregunta puede tener un campo `TextoDeAyuda` en la base de datos. Si está definido, sobreescribe el texto de ayuda por defecto del tipo de respuesta:
+
+```csharp Formulario.aspx.cs
+// si se especifica en la BDD; este valor substituye al texto por defecto
+if (!String.IsNullOrEmpty(pregActual.TextoDeAyuda))
+    TextoDeAyuda.Text = @"<h6 style=""color: grey;"">("
+        + pregActual.TextoDeAyuda + ")</h6><br>";
+```
+
+El texto se renderiza justo debajo del enunciado de la pregunta, antes de los controles de respuesta.

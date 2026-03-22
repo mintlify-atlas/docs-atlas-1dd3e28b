@@ -1,0 +1,169 @@
+---
+title: "DALRespuestaDelUsuario"
+description: "Acceso a datos para guardar y leer las respuestas del usuario."
+---
+
+`DALRespuestaDelUsuario` gestiona todas las operaciones de lectura y escritura sobre la tabla `RespuestaDelUsuario`. Se encuentra en `DAL/DALRespuestaDelUsuario.cs`.
+
+## Constructor
+
+Crea una instancia de `DbConnect` que abre la conexión SQL Server.
+
+```csharp csharp
+public DALRespuestaDelUsuario()
+{
+    MainCnx = new DbConnect();
+}
+```
+
+## Métodos de instancia
+
+### NuevaRespuesta
+
+Inserta una nueva fila en `RespuestaDelUsuario`. Utiliza consultas parametrizadas para prevenir inyección SQL.
+
+<ParamField path="ridUsuario1" type="int" required>
+  Identificador del usuario (`Usuario.IdUsuario`).
+</ParamField>
+<ParamField path="ridRespuestaPosible1" type="int" required>
+  Identificador de la respuesta posible seleccionada (`RespuestaPosible.IdRespuestaPosible`). Puede ser `0` cuando se guarda solo texto libre.
+</ParamField>
+<ParamField path="ridPregunta1" type="int" required>
+  Identificador de la pregunta respondida (`Pregunta.IdPregunta`).
+</ParamField>
+<ParamField path="valorRespuesta" type="string">
+  Texto libre introducido por el usuario. Máximo 200 caracteres (`NVarChar(200)`). Se convierte a `DBNull` si es `null` mediante `NullToDB()`.
+</ParamField>
+<ParamField path="esSoloTexto" type="bool" required>
+  Indica si la respuesta es exclusivamente texto libre (sin opción seleccionada).
+</ParamField>
+
+#### SQL ejecutado
+
+```sql sql
+INSERT INTO RespuestaDelUsuario
+    (RIdUsuario1, RIdRespuestaPosible1, RIdPregunta1, ValorRespuesta, EsSoloTexto)
+VALUES
+    (@RidUsuario1, @RidRespuestaPosible1, @RIdPregunta1, @ValorRespuesta, @EsSoloTexto)
+```
+
+---
+
+### BorrarAnteriorRespuesta
+
+Elimina la respuesta previa de un usuario para una pregunta concreta. Se llama **antes** de `NuevaRespuesta` para evitar duplicados cuando el usuario navega hacia atrás y vuelve a responder.
+
+<ParamField path="ridUsuario1" type="int" required>
+  Identificador del usuario.
+</ParamField>
+<ParamField path="ridPregunta1" type="int" required>
+  Identificador de la pregunta cuya respuesta anterior se eliminará.
+</ParamField>
+
+#### SQL ejecutado
+
+```sql sql
+DELETE FROM RespuestaDelUsuario
+WHERE RIdUsuario1 = @RidUsuario1
+  AND RIdPregunta1 = @RIdPregunta1
+```
+
+<Tip>
+El flujo en `GuardarRespuestas` (`Formulario.aspx.cs`) llama a `BorrarAnteriorRespuesta` solo antes del primer `NuevaRespuesta` de cada ciclo, evitando borrar filas de preguntas de tipo checkbox con varias opciones seleccionadas.
+</Tip>
+
+---
+
+### LeerValoresUsuario
+
+Lee los valores clave del usuario (nombre, teléfono, número de trabajadores y actividad) a partir de las respuestas que guardó durante el cuestionario. Utiliza el campo `SysTokenCode` de la tabla `Pregunta` para identificar cada pregunta semántica.
+
+<ParamField path="ridUsuario1" type="int" required>
+  Identificador del usuario cuyos valores se quieren leer.
+</ParamField>
+<ParamField path="name" type="string" required>
+  Parámetro de salida (`out`). Nombre del usuario, leído de la pregunta con `SysTokenCode = 'NAME'`.
+</ParamField>
+<ParamField path="phone" type="string" required>
+  Parámetro de salida (`out`). Teléfono, leído de `SysTokenCode = 'PHONE'`.
+</ParamField>
+<ParamField path="numWorkers" type="string" required>
+  Parámetro de salida (`out`). Número de trabajadores, leído de la opción seleccionada en `SysTokenCode = 'NUMWORKERS'` (join con `RespuestaPosible`).
+</ParamField>
+<ParamField path="actividad" type="string" required>
+  Parámetro de salida (`out`). Actividad económica, leída de `SysTokenCode = 'ACTIVITY'`. Primero se intenta como valor libre (`ValorRespuesta`); si está vacío, se toma como opción seleccionada (`TextoRespuesta` vía join con `RespuestaPosible`).
+</ParamField>
+
+#### SQL — consulta de valores de texto libre
+
+Se reutiliza para `NAME`, `PHONE` y la primera comprobación de `ACTIVITY`:
+
+```sql sql
+SELECT ru.ValorRespuesta
+FROM Pregunta p
+INNER JOIN RespuestaDelUsuario ru
+    ON ru.RIdPregunta1 = p.IdPregunta
+WHERE ru.RIdUsuario1 = @RidUsuario1
+  AND p.SysTokenCode = @SysTokenCode
+```
+
+#### SQL — consulta de opción seleccionada
+
+Se utiliza para `NUMWORKERS` y para `ACTIVITY` cuando el valor libre está vacío:
+
+```sql sql
+SELECT rp.TextoRespuesta
+FROM Pregunta p
+INNER JOIN RespuestaDelUsuario ru
+    ON ru.RIdPregunta1 = p.IdPregunta
+INNER JOIN RespuestaPosible rp
+    ON rp.RIdPregunta1 = p.IdPregunta
+    AND rp.IdRespuestaPosible = ru.RIdRespuestaPosible1
+WHERE ru.RIdUsuario1 = @RidUsuario1
+  AND p.SysTokenCode = @SysTokenCode
+```
+
+#### Lógica de resolución de `ACTIVITY`
+
+```csharp csharp
+// Primer intento: valor tecleado por el usuario
+SysTokenCode.Value = "ACTIVITY";
+actividad = (string)NullFromDB(comando.ExecuteScalar());
+
+// Segundo intento: opción seleccionada (si el primero fue vacío)
+if (String.IsNullOrEmpty(actividad))
+{
+    SysTokenCode.Value = "ACTIVITY";
+    actividad = (string)NullFromDB(comando.ExecuteScalar());
+}
+```
+
+## Métodos estáticos auxiliares
+
+### NullToDB
+
+Convierte `null` de .NET en `DBNull.Value` para pasarlo como parámetro SQL.
+
+```csharp csharp
+public static object NullToDB(object val)
+{
+    if (val == null)
+        return DBNull.Value;
+    else
+        return val;
+}
+```
+
+### NullFromDB
+
+Convierte `DBNull.Value` recibido de un `SqlDataReader` o `ExecuteScalar` en `null` de .NET.
+
+```csharp csharp
+public static object NullFromDB(object val)
+{
+    if (val == DBNull.Value)
+        return null;
+    else
+        return val;
+}
+```

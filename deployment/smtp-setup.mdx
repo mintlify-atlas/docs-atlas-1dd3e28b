@@ -1,0 +1,148 @@
+---
+title: "Configuración de SMTP"
+description: "Cómo configurar el servidor de correo para las notificaciones de email."
+---
+
+Consultoría Online envía correos electrónicos automáticos en dos momentos del flujo: al registrarse un usuario y al finalizar el cuestionario. La configuración SMTP está actualmente **hardcodeada** en el método `EnviarMail()` de `Formulario.aspx.cs`.
+
+<Warning>
+  Las credenciales SMTP que aparecen en el código fuente (`Formulario.aspx.cs`) son credenciales reales de producción comprometidas. Deben rotarse inmediatamente si el repositorio ha sido accesible externamente. No las almacenes en el repositorio de código.
+</Warning>
+
+---
+
+## Configuración actual
+
+### Servidor SMTP
+
+El método `EnviarMail` configura el cliente SMTP directamente en el código:
+
+```csharp Formulario.aspx.cs
+SmtpClient smtpSender = new SmtpClient();
+smtpSender.Host = "uk.scriptmail.yourwebservers.com";
+smtpSender.Credentials = new System.Net.NetworkCredential(
+    "consultoriadedatos.com@script.mail",
+    "6g-QkK2!"
+);
+smtpSender.Port = 25;
+smtpSender.EnableSsl = true;
+
+await smtpSender.SendMailAsync(msg);
+```
+
+### Remitente y BCC
+
+```csharp Formulario.aspx.cs
+msg.From = new MailAddress("webregister@consultoriadedatos.com", "Consultoria de Datos");
+msg.Bcc.Add("webregister@consultoriadedatos.com"); // copia oculta siempre incluida
+```
+
+Todos los correos enviados incluyen automáticamente una copia oculta (BCC) a `webregister@consultoriadedatos.com`.
+
+### Tipos de correo enviados
+
+| Tipo (`MailType`) | Destinatario | Asunto | Plantilla |
+|---|---|---|---|
+| `register` | Email del usuario | `Su Registro - Consultoria de Datos` | `~/mails/REGISTER.html` |
+| `finalized` | Email del usuario | `Su estudio de Digitalización - Consultoria de Datos` | `~/mails/FINALIZED.html` |
+| `results` | `pguillon@vegalia.com` (interno) | `Documento Informe disponible...` | Cuerpo en texto plano |
+
+### Plantillas de correo
+
+Las plantillas son archivos HTML en el directorio `~/mails/`. Se usan dos tokens de sustitución:
+
+```csharp
+htmlBody = htmlBody.Replace("@COMPANY", "Consultoria de Datos");
+htmlBody = htmlBody.Replace("@MAIL", email);
+```
+
+Archivos de plantilla incluidos en el proyecto:
+
+- `~/mails/REGISTER.html` — correo de bienvenida al registrarse
+- `~/mails/FINALIZED.html` — correo de finalización del cuestionario
+- `~/mails/CONTACT.html`, `~/mails/NEWS.html` — plantillas adicionales (no usadas activamente)
+
+---
+
+## Alternativa: integración con TurboSMTP API
+
+El proyecto incluye el método `SendSMTPTurbo()` como alternativa para enviar el informe final a través de la API REST de TurboSMTP, usando `RestSharp`:
+
+```csharp Formulario.aspx.cs
+var client = new RestClient();
+client.BaseUrl = "https://api.eu.turbo-smtp.com";
+var request = new RestRequest("api/v2/mail/send", Method.POST);
+
+var body = new TurboRequest
+{
+    from = "webregister@consultoriadedatos.com",
+    to = "pguillon@vegalia.com, carlospi88@yahoo.es",
+    subject = "Documento Informe - Consultoria de Datos - " + email,
+    content = "Archivo resultado de la consultoria",
+    attachments = attachments // adjunto en Base64
+};
+
+request.AddHeader("authuser", "pguillon@vegalia.com");
+request.AddHeader("authpass", "...");
+IRestResponse response = client.Execute(request);
+```
+
+Este método **no está integrado en el flujo principal** (`EnviarMail` no lo llama). Para activarlo, habría que invocarlo explícitamente en lugar de o además de `EnviarMail(MailType.results, ...)`.
+
+---
+
+## Enfoques de configuración
+
+<Tabs>
+  <Tab title="Enfoque actual (hardcoded)">
+    La configuración actual funciona pero tiene las siguientes limitaciones:
+
+    - Credenciales en texto plano dentro del código fuente
+    - Cambiar el servidor SMTP requiere recompilar y redesplegar
+    - Dificulta el uso de entornos de desarrollo/staging con servidores SMTP distintos
+
+    Para usar el enfoque actual en tu entorno, localiza y edita estas líneas en `Formulario.aspx.cs`:
+
+    ```csharp
+    smtpSender.Host = "tu-servidor-smtp.com";
+    smtpSender.Credentials = new System.Net.NetworkCredential(
+        "tu-usuario-smtp",
+        "tu-contraseña-smtp"
+    );
+    smtpSender.Port = 587; // ajusta según tu proveedor
+    smtpSender.EnableSsl = true;
+    ```
+  </Tab>
+  <Tab title="Enfoque recomendado (Web.config)">
+    <Tip>
+      La práctica recomendada en ASP.NET es mover la configuración SMTP a la sección `<system.net><mailSettings>` de `Web.config`, lo que permite cambiar credenciales sin recompilar y mantenerlas fuera del código fuente.
+    </Tip>
+
+    **Paso 1:** Añade la sección `mailSettings` a `Web.config`:
+
+    ```xml Web.config
+    <system.net>
+      <mailSettings>
+        <smtp deliveryMethod="Network" from="webregister@consultoriadedatos.com">
+          <network
+            host="tu-servidor-smtp.com"
+            port="587"
+            userName="tu-usuario-smtp"
+            password="tu-contraseña-smtp"
+            enableSsl="true" />
+        </smtp>
+      </mailSettings>
+    </system.net>
+    ```
+
+    **Paso 2:** Simplifica `EnviarMail()` en `Formulario.aspx.cs` para que `SmtpClient` lea la configuración automáticamente:
+
+    ```csharp
+    // SmtpClient() sin argumentos lee la configuración de Web.config
+    SmtpClient smtpSender = new SmtpClient();
+    await smtpSender.SendMailAsync(msg);
+    ```
+
+    De esta forma, las credenciales quedan fuera del código fuente y pueden gestionarse mediante transformaciones de `Web.config` por entorno (`Web.Release.config`, variables de entorno de IIS, etc.).
+  </Tab>
+</Tabs>

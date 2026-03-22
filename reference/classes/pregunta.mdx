@@ -1,0 +1,178 @@
+---
+title: "Pregunta"
+description: "Clase de dominio que representa una pregunta del cuestionario."
+---
+
+## Class definition
+
+```csharp Classes/Pregunta.cs
+namespace ConsultoriaOnline
+{
+    public class Pregunta
+    {
+        private int idPregunta;
+        private string textoPregunta;
+        private string nombreApartado;
+        private int? ridPregunta1;
+        private int ridTipoRespuesta1;
+        private Int16? ordenAparicion;
+        private int? ridApartadoPreguntas1;
+        private bool noMostrar;
+        private string textoDeAyuda;
+        private bool esOpcional;
+
+        public int IdPregunta { get => idPregunta; set => idPregunta = value; }
+        public string TextoPregunta { get => textoPregunta; set => textoPregunta = value; }
+        public int? RidPregunta1 { get => ridPregunta1; set => ridPregunta1 = value; }
+        public int RidTipoRespuesta1 { get => ridTipoRespuesta1; set => ridTipoRespuesta1 = value; }
+        public Int16? OrdenAparicion { get => ordenAparicion; set => ordenAparicion = value; }
+        public int? RidApartadoPreguntas1 { get => ridApartadoPreguntas1; set => ridApartadoPreguntas1 = value; }
+        public bool NoMostrar { get => noMostrar; set => noMostrar = value; }
+        public string TextoDeAyuda { get => textoDeAyuda; set => textoDeAyuda = value; }
+        public bool EsOpcional { get => esOpcional; set => esOpcional = value; }
+        public string NombreApartado { get => nombreApartado; set => nombreApartado = value; }
+    }
+}
+```
+
+## Properties
+
+<ResponseField name="IdPregunta" type="int" required>
+  Primary key. Uniquely identifies the question in the database.
+</ResponseField>
+
+<ResponseField name="TextoPregunta" type="string" required>
+  The question text displayed to the user inside an `<h3>` element during the questionnaire.
+</ResponseField>
+
+<ResponseField name="NombreApartado" type="string">
+  Section name populated via a JOIN with `ApartadoPreguntas`. Not a database column on `Pregunta`
+  itself — it is read from the joined `NomApartado` value and rendered as a grey `<h4>` header
+  above the question.
+</ResponseField>
+
+<ResponseField name="RidPregunta1" type="int?">
+  Nullable foreign key to a parent `Pregunta`. When non-null, the question is a **re-question**
+  (repregunta) and is only shown when the parent question's selected answer has
+  `PermiteRepregunta = true`.
+</ResponseField>
+
+<ResponseField name="RidTipoRespuesta1" type="int" required>
+  Foreign key to `TipoRespuesta`. Controls which input widget is rendered.
+
+  <Expandable title="Values">
+    | Value | Name    | Widget rendered |
+    |-------|---------|------------------|
+    | 1     | `text`  | Single-line TextBox |
+    | 2     | `num`   | Single-line TextBox (numeric validation) |
+    | 3     | `radio` | RadioButton group |
+    | 4     | `check` | CheckBox group |
+    | 5     | `memo`  | Multi-line TextBox |
+  </Expandable>
+</ResponseField>
+
+<ResponseField name="OrdenAparicion" type="Int16?">
+  Display order within the questionnaire. The DAL query orders results by `ORDER BY OrdenAparicion`.
+</ResponseField>
+
+<ResponseField name="RidApartadoPreguntas1" type="int?">
+  Foreign key to `ApartadoPreguntas`. Determines which section the question belongs to. Used in
+  the JOIN condition in `DALPregunta.ObtenerPreguntas`.
+</ResponseField>
+
+<ResponseField name="NoMostrar" type="bool" required>
+  When `true`, the question is excluded from the loaded question list. The DAL applies
+  `AND p.NoMostrar = 0` in the `WHERE` clause so these questions are never returned to the
+  application.
+</ResponseField>
+
+<ResponseField name="TextoDeAyuda" type="string">
+  Optional help text shown below the question in a grey `<h6>` element. When set, it overrides
+  the default hint text generated from `RidTipoRespuesta1` (e.g., "marque una de las opciones").
+</ResponseField>
+
+<ResponseField name="EsOpcional" type="bool" required>
+  When `true`, `GuardarRespuestas` returns `true` unconditionally, allowing the user to advance
+  without providing an answer. Mandatory questions return `false` until at least one valid answer
+  is given.
+</ResponseField>
+
+## Re-question logic
+
+A question is a **re-question** when `RidPregunta1 != null`. Re-questions are only displayed
+when the preceding question's selected `RespuestaPosible` has `PermiteRepregunta = true`.
+
+`MostrarSiguientePregunta` checks this before rendering:
+
+```csharp Formulario.aspx.cs
+private void MostrarSiguientePregunta(int numPregParaMostrar, bool mostrarRepregunta)
+{
+    Pregunta pregActual = MySession.Current.Preguntas[numPregParaMostrar];
+    if (pregActual.RidPregunta1 != null && !mostrarRepregunta)
+    {
+        // es repregunta, pero NO toca mostrarla — skip recursively
+        MostrarSiguientePregunta(numPregParaMostrar + 1, false);
+        return;
+    }
+    // ... render the question
+}
+```
+
+The `mostrarRepregunta` flag is set to `true` in `GuardarRespuestas` when any saved answer has
+`PermiteRepregunta = true`.
+
+## SysTokenCode — special field
+
+`Pregunta` has a database-level `SysTokenCode` column (not represented in the C# class) that
+links specific questions to user profile fields. After the questionnaire is complete,
+`DALRespuestaDelUsuario.LeerValoresUsuario` queries answers for these token codes to populate
+the `Usuario` record.
+
+| SysTokenCode  | Maps to            | Answer type |
+|---------------|--------------------|-------------|
+| `NAME`        | User display name  | Free text   |
+| `PHONE`       | Phone number       | Free text   |
+| `ACTIVITY`    | Business activity  | Text or selected option |
+| `NUMWORKERS`  | Number of workers  | Selected option text |
+
+```csharp DAL/DALRespuestaDelUsuario.cs
+SysTokenCode.Value = "NAME";
+name = (string)NullFromDB(comando.ExecuteScalar());
+
+SysTokenCode.Value = "PHONE";
+phone = (string)NullFromDB(comando.ExecuteScalar());
+
+SysTokenCode.Value = "ACTIVITY";
+actividad = (string)NullFromDB(comando.ExecuteScalar());
+
+SysTokenCode.Value = "NUMWORKERS";
+numWorkers = (string)NullFromDB(comando.ExecuteScalar());
+```
+
+## Usage in the application
+
+All questions for a questionnaire model are loaded once when the user clicks "Empezar" and
+stored in `MySession.Current.Preguntas`:
+
+```csharp Formulario.aspx.cs
+List<Pregunta> pregs = new DALPregunta().ObtenerPreguntas(MySession.Current.IdModeloCuestionario);
+MySession.Current.Preguntas = pregs;
+MySession.Current.TotalPreguntas = pregs.Count;
+```
+
+The DAL query that loads them:
+
+```csharp DAL/DALPregunta.cs
+SELECT p.*, a.NomApartado
+FROM Pregunta p
+INNER JOIN ApartadoPreguntas a
+    ON a.IdApartadoPreguntas = p.RIdApartadoPreguntas1
+WHERE a.RIdModeloCuestionario1 = {0}
+  AND p.NoMostrar = 0
+ORDER BY OrdenAparicion
+```
+
+<Note>
+  Questions are indexed by position in `MySession.Current.Preguntas`. The current question index
+  is stored as the `np` HTML attribute on the "Siguiente" button, enabling correct back-navigation.
+</Note>

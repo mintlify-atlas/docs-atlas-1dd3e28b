@@ -1,0 +1,111 @@
+---
+title: "Registro de usuarios"
+description: "Cómo funciona el registro por email y la gestión de la sesión de usuario."
+---
+
+El proceso de registro recoge únicamente la dirección de correo electrónico del usuario. El nombre, teléfono y otros datos de perfil se extraen automáticamente de las respuestas al cuestionario al finalizar.
+
+## Flujo de registro
+
+<Steps>
+  <Step title="El usuario introduce su email">
+    El formulario de registro (`registrationForm`) muestra un único campo: correo electrónico (`<asp:TextBox TextMode="Email" />`). Un `RequiredFieldValidator` garantiza que el campo no quede vacío.
+  </Step>
+
+  <Step title="Aceptación de la política de privacidad">
+    Una casilla de verificación HTML estándar con el atributo `required` enlaza al texto de la Política de Privacidad de Vegalia. El manejador de evento `onchange` invoca la función JavaScript `isChecked(this, 'submitCallForm')`, que habilita o deshabilita el botón de envío en función del estado de la casilla. La validación es estrictamente del lado del cliente.
+  </Step>
+
+  <Step title="Envío y creación del usuario">
+    Al pulsar **Regístrarme**, se dispara `registarUsuario_Click`. Si la página supera la validación de ASP.NET, se llama a `DALUsuario.NuevoUsuario()` con el email y el ID de modelo de cuestionario (hardcodeado como `9`). La función devuelve el nuevo `IdUsuario` generado por la base de datos.
+  </Step>
+
+  <Step title="Inicialización de la sesión">
+    Con el `IdUsuario` recibido, se inicializan tres propiedades en `MySession.Current`:
+
+    - `MySession.Current.Email` — dirección de correo del usuario
+    - `MySession.Current.IdUsuario` — identificador único del registro
+    - `MySession.Current.IdModeloCuestionario` — modelo de cuestionario a usar (`9`)
+  </Step>
+
+  <Step title="Email de confirmación y pantalla de bienvenida">
+    Se envía un correo de confirmación mediante `EnviarMail(MailType.register, email)`. El panel `registrationForm` se oculta y se muestra `registradoMsg`, que contiene el botón **¡Empezar con el estudio!**
+  </Step>
+</Steps>
+
+## Código fuente: `registarUsuario_Click`
+
+```csharp Formulario.aspx.cs
+protected void registarUsuario_Click(object sender, EventArgs e)
+{
+    if (!Page.IsValid)
+        return;
+
+    int modelo = 9;
+    int? idUser = null;
+
+    DALUsuario dal = new DALUsuario();
+    idUser = dal.NuevoUsuario("", email.Text, "", "", 0, modelo);
+
+    limpiarUI();
+
+    if (idUser != null)
+    {
+        MySession.Current.Email = email.Text;
+        MySession.Current.IdUsuario = idUser.Value;
+        MySession.Current.IdModeloCuestionario = modelo;
+
+        LogMessage(">> REGISTRO: " + email.Text);
+        LogMessage("");
+
+        registrationForm.Visible = false;
+        registradoMsg.Visible = true;
+
+        EnviarMail(MailType.register, email.Text);
+    }
+}
+```
+
+## Validación de sesión en `Page_Load`
+
+En cada postback, `Page_Load` comprueba `MySession.Current.IdUsuario`. Si el valor es `0` (sesión no inicializada o expirada), muestra de nuevo el formulario de registro y oculta todos los demás paneles:
+
+```csharp Formulario.aspx.cs
+protected void Page_Load(object sender, EventArgs e)
+{
+    if (MySession.Current.IdUsuario == 0)
+    {
+        TitleStyle = "padding: 10px; display:block";
+        registrationForm.Visible = true;
+        registradoMsg.Visible = false;
+        itemForm.Visible = false;
+        finalizadoMsg.Visible = false;
+    }
+    // ...
+}
+```
+
+## `DALUsuario.NuevoUsuario`
+
+El método inserta una fila en la tabla `Usuario` y devuelve el `IdUsuario` recién generado mediante la cláusula `OUTPUT`:
+
+```csharp DAL/DALUsuario.cs
+public int? NuevoUsuario(string nombreUsuario, string email, string telefono,
+    string actividad, int? numEmpleados, int rIdModeloCuestionario1)
+{
+    string cadena = @"
+SET NOCOUNT ON;
+DECLARE @generated_keys table(IdUsuario int)
+INSERT INTO Usuario (NombreUsuario, Email, Telefono, Actividad, NumEmpleados, RIdModeloCuestionario1)
+    output INSERTED.IdUsuario INTO @generated_keys
+VALUES (@NombreUsuario, @Email, @Telefono, @Actividad, @NumEmpleados, @RIdModeloCuestionario1)
+SELECT TOP 1 IdUsuario FROM @generated_keys WHERE @@ROWCOUNT > 0";
+    // ...
+    idUsuario = (int?)comando.ExecuteScalar();
+    return idUsuario;
+}
+```
+
+<Note>
+  La sesión de usuario se almacena en `HttpSessionState` bajo la clave `__MySession__` mediante el patrón singleton `MySession.Current`. Si la sesión del servidor expira (tiempo de espera predeterminado de IIS), `IdUsuario` vuelve a `0` y el usuario verá de nuevo el formulario de registro. Los datos ya guardados en la base de datos se conservan.
+</Note>

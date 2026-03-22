@@ -1,0 +1,151 @@
+---
+title: "DALUsuario"
+description: "Acceso a datos para la tabla Usuario."
+---
+
+`DALUsuario` gestiona el alta, la actualización y la consulta de registros en la tabla `Usuario`. Se encuentra en `DAL/DALUsuario.cs`.
+
+## Constructor
+
+Crea una instancia de `DbConnect` que abre la conexión SQL Server.
+
+```csharp csharp
+public DALUsuario()
+{
+    MainCnx = new DbConnect();
+}
+```
+
+## Métodos
+
+### NuevoUsuario
+
+Inserta un nuevo usuario en la base de datos y devuelve el `IdUsuario` generado por la base de datos. Utiliza el patrón `OUTPUT INSERTED` con una tabla variable para recuperar la clave primaria de forma segura incluso con triggers.
+
+<ParamField path="nombreUsuario" type="string" required>
+  Nombre del usuario (`NVarChar(200)`).
+</ParamField>
+<ParamField path="email" type="string" required>
+  Dirección de correo electrónico (`NVarChar(200)`).
+</ParamField>
+<ParamField path="telefono" type="string" required>
+  Número de teléfono (`NVarChar(50)`).
+</ParamField>
+<ParamField path="actividad" type="string" required>
+  Actividad económica de la empresa (`NVarChar(200)`).
+</ParamField>
+<ParamField path="numEmpleados" type="int?">
+  Número de empleados. Admite `null`.
+</ParamField>
+<ParamField path="rIdModeloCuestionario1" type="int" required>
+  Identificador del modelo de cuestionario asignado al usuario.
+</ParamField>
+
+<ResponseField name="return" type="int?">
+  El `IdUsuario` recién generado, o `null` si no se insertó ninguna fila o se produjo una excepción.
+</ResponseField>
+
+#### SQL ejecutado
+
+```sql sql
+SET NOCOUNT ON;
+DECLARE @generated_keys table(IdUsuario int)
+
+INSERT INTO Usuario
+    (NombreUsuario, Email, Telefono, Actividad, NumEmpleados, RIdModeloCuestionario1)
+    OUTPUT INSERTED.IdUsuario INTO @generated_keys
+VALUES
+    (@NombreUsuario, @Email, @Telefono, @Actividad, @NumEmpleados, @RIdModeloCuestionario1)
+
+SELECT TOP 1 IdUsuario FROM @generated_keys WHERE @@ROWCOUNT > 0
+```
+
+<Note>
+`SET NOCOUNT ON` evita que el mensaje de recuento de filas afectadas interfiera con `ExecuteScalar`. La tabla variable `@generated_keys` es la alternativa recomendada a `SCOPE_IDENTITY()` cuando hay triggers en la tabla.
+</Note>
+
+#### Ejemplo de uso
+
+```csharp csharp
+// En registarUsuario_Click (Formulario.aspx.cs)
+int modelo = 9;
+DALUsuario dal = new DALUsuario();
+int? idUser = dal.NuevoUsuario("", email.Text, "", "", 0, modelo);
+
+if (idUser != null)
+{
+    MySession.Current.IdUsuario = idUser.Value;
+    MySession.Current.IdModeloCuestionario = modelo;
+}
+```
+
+---
+
+### UpdateUsuario
+
+Actualiza los campos de perfil del usuario al finalizar el cuestionario, con los valores obtenidos por `DALRespuestaDelUsuario.LeerValoresUsuario`. Todos los parámetros de cadena admiten `null`; en ese caso se sustituyen por cadena vacía (`?? ""`)
+
+<ParamField path="idUsuario" type="int?" required>
+  Identificador del usuario a actualizar.
+</ParamField>
+<ParamField path="nombreUsuario" type="string">
+  Nombre del usuario. Nulo se trata como cadena vacía.
+</ParamField>
+<ParamField path="telefono" type="string">
+  Teléfono. Nulo se trata como cadena vacía.
+</ParamField>
+<ParamField path="numWorkers" type="string">
+  Número de trabajadores (texto). Nulo se trata como cadena vacía.
+</ParamField>
+<ParamField path="actividad" type="string">
+  Actividad económica. Nulo se trata como cadena vacía.
+</ParamField>
+
+#### SQL ejecutado
+
+```sql sql
+UPDATE Usuario
+SET NombreUsuario = @NombreUsuario,
+    Telefono      = @Telefono,
+    Actividad     = @Actividad,
+    NumWorkers    = @NumWorkers
+WHERE IdUsuario = @IdUsuario
+```
+
+#### Ejemplo de uso
+
+```csharp csharp
+// Al finalizar el cuestionario (butSiguiente_Click)
+new DALRespuestaDelUsuario().LeerValoresUsuario(
+    MySession.Current.IdUsuario,
+    out string name, out string phone, out string numWorkers, out string actividad);
+
+new DALUsuario().UpdateUsuario(
+    MySession.Current.IdUsuario, name, phone, numWorkers, actividad);
+```
+
+---
+
+### ObtenerRespuestas
+
+Lee el campo `Resultado` de la tabla `Usuario` para un identificador de usuario dado. Este campo almacena el resultado o diagnóstico generado al procesar el cuestionario.
+
+<ParamField path="idUsuario" type="int" required>
+  Identificador del usuario.
+</ParamField>
+
+<ResponseField name="return" type="string">
+  Contenido del campo `Resultado`, o `null` si se produce una excepción.
+</ResponseField>
+
+#### SQL ejecutado
+
+```sql sql
+SELECT Resultado
+FROM Usuario p
+WHERE IdUsuario = {idUsuario}
+```
+
+<Warning>
+Como en `DALPregunta.ObtenerPreguntas`, el valor de `idUsuario` se interpola directamente en la cadena SQL con `String.Format`. El valor procede de la sesión del servidor, no de entrada del usuario, pero se recomienda migrar a parámetros.
+</Warning>

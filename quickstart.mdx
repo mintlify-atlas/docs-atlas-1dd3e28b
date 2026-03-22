@@ -1,80 +1,207 @@
 ---
-title: "Quickstart"
-description: "Start building awesome documentation in minutes"
+title: "Inicio rápido"
+description: "Cómo desplegar y configurar Consultoría Online para empezar a recibir respuestas."
 ---
 
-## Get started in three steps
+Esta guía te lleva desde cero hasta una instalación funcional de Consultoría Online en menos de 30 minutos.
 
-Get your documentation site running locally and make your first customization.
+## Prerrequisitos
 
-### Step 1: Set up your local environment
+Antes de empezar, asegúrate de tener:
 
-<AccordionGroup>
-  <Accordion icon="copy" title="Clone your docs locally">
-    During the onboarding process, you created a GitHub repository with your docs content if you didn't already have one. You can find a link to this repository in your [dashboard](https://dashboard.mintlify.com).
-    
-    To clone the repository locally so that you can make and preview changes to your docs, follow the [Cloning a repository](https://docs.github.com/en/repositories/creating-and-managing-repositories/cloning-a-repository) guide in the GitHub docs.
-  </Accordion>
-  <Accordion icon="rectangle-terminal" title="Start the preview server">
-    1. Install the Mintlify CLI: `npm i -g mint`
-    2. Navigate to your docs directory and run: `mint dev`
-    3. Open `http://localhost:3000` to see your docs live!
-    
-    <Tip>Your preview updates automatically as you edit files.</Tip>
-  </Accordion>
-</AccordionGroup>
+- **Windows Server** con IIS instalado (con el módulo URL Rewrite)
+- **.NET Framework 4.7.2** instalado en el servidor
+- **SQL Server** (cualquier edición: Express, Standard, Enterprise) accesible por TCP/IP
+- **Visual Studio 2019/2022** o **MSBuild** para compilar el proyecto
+- Acceso a un **servidor SMTP** para el envío de emails
+- **DevExpress** instalado (necesario para la generación de informes DOCX)
 
-### Step 2: Deploy your changes
+<Steps>
 
-<AccordionGroup>
-  <Accordion icon="github" title="Install our GitHub app">
-    Install the Mintlify GitHub app from your [dashboard](https://dashboard.mintlify.com/settings/organization/github-app).
-    
-    Our GitHub app automatically deploys your changes to your docs site, so you don't need to manage deployments yourself.
-</Accordion>
-<Accordion icon="palette" title="Update your site name and colors">
-    For a first change, let's update the name and colors of your docs site.
+<Step title="Obtener el código fuente">
 
-    1. Open `docs.json` in your editor.
-    2. Change the `"name"` field to your project name.
-    3. Update the `"colors"` to match your brand.
-    4. Save and see your changes instantly at `http://localhost:3000`.
+Clona o descarga el repositorio:
 
-    <Tip>Try changing the primary color to see an immediate difference!</Tip>
-  </Accordion>
-</AccordionGroup>
+<CodeGroup>
 
-### Step 3: Go live
+```bash git
+git clone https://github.com/chaprot/ConsultoriaOnline.git
+cd ConsultoriaOnline
+```
 
-<Accordion icon="rocket" title="Publish your docs">
-  1. Commit and push your changes.
-  2. Your docs will update and be live in moments!
-</Accordion>
+```powershell PowerShell
+Invoke-WebRequest -Uri "https://github.com/chaprot/ConsultoriaOnline/archive/refs/heads/main.zip" -OutFile "ConsultoriaOnline.zip"
+Expand-Archive -Path "ConsultoriaOnline.zip" -DestinationPath "."
+```
 
-## Next steps
+</CodeGroup>
 
-Now that you have your docs running, explore these key features:
+</Step>
 
-<CardGroup cols={2}>
+<Step title="Crear la base de datos SQL Server">
 
-<Card title="Write Content" icon="pen-to-square" href="/essentials/markdown">
-  Learn MDX syntax and start writing your documentation.
-</Card>
+Crea una nueva base de datos llamada `ConsultoriaOnline`:
 
-<Card title="Customize style" icon="palette" href="/essentials/settings">
-  Make your docs match your brand perfectly.
-</Card>
+```sql
+CREATE DATABASE ConsultoriaOnline;
+GO
+USE ConsultoriaOnline;
+GO
+```
 
-<Card title="Add code examples" icon="square-code" href="/essentials/code">
-  Include syntax-highlighted code blocks.
-</Card>
+Crea un usuario de base de datos con permisos mínimos:
 
-<Card title="API documentation" icon="code" href="/api-reference/introduction">
-  Auto-generate API docs from OpenAPI specs.
-</Card>
+```sql
+CREATE LOGIN WebAppUser WITH PASSWORD = 'TuContraseñaSegura123!';
+CREATE USER WebAppUser FOR LOGIN WebAppUser;
+GRANT SELECT, INSERT, UPDATE, DELETE ON SCHEMA::dbo TO WebAppUser;
+```
 
-</CardGroup>
+<Warning>
+No uses las credenciales de ejemplo del repositorio en producción. Crea un usuario dedicado con contraseña propia.
+</Warning>
+
+Crea las tablas necesarias y siembra los datos iniciales (ver [Configuración de la base de datos](/deployment/database-setup) para el esquema completo).
+
+</Step>
+
+<Step title="Configurar la cadena de conexión">
+
+Abre `Misc/DbConnect.cs` y actualiza las cadenas de conexión con tus datos:
+
+```csharp DbConnect.cs
+public static string DevXConnString = 
+    "data source=TU_SERVIDOR,PUERTO;user id=WebAppUser;password=TuContraseña;initial catalog=ConsultoriaOnline;Persist Security Info=true";
+
+public static string SqlConnString = 
+    @"Server=TU_SERVIDOR,PUERTO; Database=ConsultoriaOnline; User=WebAppUser; Password=TuContraseña;";
+```
+
+El formato de servidor incluye la IP/hostname y el puerto separados por coma: `185.254.207.112,28919`.
 
 <Note>
-  **Need help?** See our [full documentation](https://mintlify.com/docs) or join our [community](https://mintlify.com/community).
+`DbConnect.cs` contiene las cadenas de conexión utilizadas por la aplicación en tiempo de ejecución. La cadena en `Web.config` es utilizada exclusivamente por herramientas DevExpress de diseño.
 </Note>
+
+</Step>
+
+<Step title="Configurar SMTP">
+
+La configuración SMTP actual está en `Formulario.aspx.cs` dentro del método `EnviarMail`. Actualiza los valores con tu servidor:
+
+```csharp Formulario.aspx.cs
+SmtpClient smtpSender = new SmtpClient();
+smtpSender.Host = "tu.servidor.smtp.com";
+smtpSender.Credentials = new System.Net.NetworkCredential("tu@email.com", "tuContraseña");
+smtpSender.Port = 587;
+smtpSender.EnableSsl = true;
+```
+
+También actualiza la dirección de envío:
+
+```csharp
+msg.From = new MailAddress("noreply@tudominio.com", "Tu Empresa");
+msg.Bcc.Add("noreply@tudominio.com");
+```
+
+<Tip>
+Se recomienda mover la configuración SMTP a `Web.config` en la sección `<system.net><mailSettings>` para mayor seguridad. Ver [Configuración SMTP](/deployment/smtp-setup) para más detalles.
+</Tip>
+
+</Step>
+
+<Step title="Actualizar el modelo de cuestionario">
+
+En `Formulario.aspx.cs`, el ID de modelo de cuestionario está configurado como `9`:
+
+```csharp Formulario.aspx.cs
+int modelo = 9;
+```
+
+Asegúrate de que exista un registro con `IdModeloCuestionario = 9` en la tabla `ModeloCuestionario`, junto con sus secciones (`ApartadoPreguntas`), preguntas (`Pregunta`) y respuestas posibles (`RespuestaPosible`).
+
+</Step>
+
+<Step title="Compilar el proyecto">
+
+<CodeGroup>
+
+```bash MSBuild
+msbuild ConsultoriaOnlinePrev.sln /p:Configuration=Release
+```
+
+```bash Visual Studio
+# Abrir ConsultoriaOnlinePrev.sln en Visual Studio
+# Menú: Build > Publish Web App
+# Configuración: Release
+```
+
+</CodeGroup>
+
+</Step>
+
+<Step title="Publicar en IIS">
+
+1. En el **Administrador de IIS**, crea un nuevo sitio web o usa uno existente.
+2. Apunta la ruta física a la carpeta de publicación del proyecto.
+3. Configura el grupo de aplicaciones con **.NET CLR v4.0** y modo integrado.
+4. Asegúrate de que el documento predeterminado esté configurado en `Formulario.aspx`:
+
+```xml Web.config
+<defaultDocument>
+  <files>
+    <clear/>
+    <add value="Formulario.aspx"/>
+  </files>
+</defaultDocument>
+```
+
+5. Instala el **módulo URL Rewrite** si no está disponible (necesario para la redirección HTTPS).
+6. Concede permisos de escritura al usuario de IIS en las carpetas `~/informes/` y `~/logs/`.
+
+</Step>
+
+<Step title="Abrir en el navegador">
+
+Accede a la URL de tu sitio. Deberías ver el formulario de registro:
+
+- **Formulario de registro** — campo de email y casilla de política de privacidad
+- **Mensaje de bienvenida** — tras el registro, con el botón "¡Empezar con el estudio!"
+- **Cuestionario** — preguntas secuenciales con barra de progreso y botones de navegación
+- **Mensaje de finalización** — barra al 100% y mensaje de cierre
+
+</Step>
+
+<Step title="Registrarse y completar el cuestionario">
+
+1. Introduce una dirección de correo electrónico válida en el campo **Correo electrónico**.
+2. Marca la casilla **He leído y acepto la Política de Privacidad**.
+3. Pulsa **Regístrarme**. Recibirás un correo de confirmación.
+4. Pulsa **¡Empezar con el estudio!** para iniciar el cuestionario.
+5. Responde cada pregunta y avanza con **Pregunta siguiente**. Puedes retroceder con el botón **Pregunta anterior**.
+6. Al responder la última pregunta, la plataforma envía automáticamente los correos de cierre y muestra el mensaje de finalización.
+
+<Check>
+Si recibes el correo de registro y el cuestionario se muestra correctamente, la instalación es exitosa.
+</Check>
+
+</Step>
+
+</Steps>
+
+## Próximos pasos
+
+<CardGroup cols={2}>
+  <Card title="Configuración de base de datos" icon="database" href="/deployment/database-setup">
+    Esquema completo de tablas y datos iniciales necesarios.
+  </Card>
+  <Card title="Configuración SMTP" icon="envelope" href="/deployment/smtp-setup">
+    Opciones avanzadas para el envío de emails.
+  </Card>
+  <Card title="Tipos de respuesta" icon="list-check" href="/features/answer-types">
+    Configura los cinco tipos de respuesta disponibles.
+  </Card>
+  <Card title="Generación de informes" icon="file-word" href="/features/report-generation">
+    Configura la generación automática de documentos DOCX.
+  </Card>
+</CardGroup>
