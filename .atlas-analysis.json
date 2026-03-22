@@ -1,0 +1,101 @@
+{
+  "projectType": "saas",
+  "projectName": "Consultoría Online",
+  "projectDescription": "An ASP.NET Web Forms SaaS application that guides business users through a personalized digitalization assessment questionnaire, saves their answers to a SQL Server database, and generates a custom Word document report delivered via email.",
+  "theme": "almond",
+  "primaryColor": "#2E86AB",
+  "lightColor": "#D9F0FA",
+  "darkColor": "#1A5276",
+  "navigation": {
+    "tabs": [
+      {
+        "tab": "Documentation",
+        "groups": [
+          {
+            "group": "Overview",
+            "pages": ["introduction", "quickstart"]
+          },
+          {
+            "group": "Core Features",
+            "pages": [
+              "features/user-registration",
+              "features/questionnaire",
+              "features/answer-types",
+              "features/report-generation",
+              "features/email-notifications"
+            ]
+          },
+          {
+            "group": "Architecture",
+            "pages": [
+              "architecture/overview",
+              "architecture/data-model",
+              "architecture/session-management"
+            ]
+          },
+          {
+            "group": "Configuration & Deployment",
+            "pages": [
+              "deployment/prerequisites",
+              "deployment/database-setup",
+              "deployment/web-config",
+              "deployment/smtp-setup"
+            ]
+          }
+        ]
+      },
+      {
+        "tab": "Reference",
+        "groups": [
+          {
+            "group": "Classes",
+            "pages": [
+              "reference/classes/pregunta",
+              "reference/classes/respuesta-posible",
+              "reference/classes/apartado-preguntas",
+              "reference/classes/modelo-cuestionario"
+            ]
+          },
+          {
+            "group": "Data Access Layer",
+            "pages": [
+              "reference/dal/dal-pregunta",
+              "reference/dal/dal-respuesta-del-usuario",
+              "reference/dal/dal-usuario",
+              "reference/dal/dal-respuesta-posible"
+            ]
+          },
+          {
+            "group": "FAQ",
+            "pages": ["faq"]
+          }
+        ]
+      }
+    ]
+  },
+  "keyFeatures": [
+    "Email-based user registration with privacy policy acceptance",
+    "Multi-step digitalization assessment questionnaire with progress bar",
+    "Multiple answer types: radio buttons, checkboxes, text, numeric, and memo fields",
+    "Conditional follow-up questions (re-questions) based on selected answers",
+    "Optional questions support for flexible questionnaire flow",
+    "Automated Word document (DOCX) report generation per user",
+    "Email notifications on registration and questionnaire completion",
+    "Session-based state management for multi-page form navigation",
+    "SQL Server persistence of all user answers and profiles",
+    "Questionnaire model system supporting multiple configurable questionnaires"
+  ],
+  "publicApiSurface": [
+    "Formulario.aspx — main user-facing entry point",
+    "DALUsuario.NuevoUsuario() — register new user",
+    "DALUsuario.UpdateUsuario() — update user profile after completion",
+    "DALPregunta.ObtenerPreguntas() — fetch ordered questions for a questionnaire model",
+    "DALRespuestaPosible.ObtenerRespuestasPosibles() — fetch possible answers per questionnaire",
+    "DALRespuestaDelUsuario.NuevaRespuesta() — save a user's answer",
+    "DALRespuestaDelUsuario.BorrarAnteriorRespuesta() — remove previous answer before saving new one",
+    "DALRespuestaDelUsuario.LeerValoresUsuario() — extract name, phone, activity, numWorkers from answers",
+    "Formulario.GenerateInforme() — generate DOCX report for a user",
+    "Formulario.EnviarMail() — send registration, finalized, or results email",
+    "MySession.Current — singleton session accessor for current user state"
+  ]
+}
