@@ -125,18 +125,25 @@ WHERE ru.RIdUsuario1 = @RidUsuario1
 
 #### Lógica de resolución de `ACTIVITY`
 
-```csharp csharp
-// Primer intento: valor tecleado por el usuario
+`ACTIVITY` admite tanto un valor libre escrito por el usuario como una opción seleccionada de una lista. El método lo resuelve en dos pasos:
+
+```csharp DAL/DALRespuestaDelUsuario.cs
+// Paso 1: intentar leer como valor libre (ValorRespuesta)
+// comando.CommandText apunta a la consulta de texto libre
 SysTokenCode.Value = "ACTIVITY";
 actividad = (string)NullFromDB(comando.ExecuteScalar());
 
-// Segundo intento: opción seleccionada (si el primero fue vacío)
+// Paso 2: si el valor libre está vacío, leer como opción seleccionada (TextoRespuesta)
+// comando.CommandText se cambia a la consulta con JOIN a RespuestaPosible
 if (String.IsNullOrEmpty(actividad))
 {
+    // El CommandText se actualiza al query de opción seleccionada antes de este punto
     SysTokenCode.Value = "ACTIVITY";
     actividad = (string)NullFromDB(comando.ExecuteScalar());
 }
 ```
+
+El cambio de `CommandText` entre los dos intentos ocurre en el bloque de código que actualiza `comando.CommandText` a la consulta de `TextoRespuesta` (join con `RespuestaPosible`) antes de leer `NUMWORKERS`.
 
 ## Métodos estáticos auxiliares
 

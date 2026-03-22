@@ -65,7 +65,7 @@ All possible answers for a questionnaire model are loaded once at session start 
 `MySession.Current.Respuestas`. The DAL query joins through `Pregunta` and `ApartadoPreguntas`
 to scope results to the active model and exclude hidden questions:
 
-```csharp DAL/DALRespuestaPosible.cs
+```sql DAL/DALRespuestaPosible.cs
 SELECT r.* FROM RespuestaPosible r
 INNER JOIN Pregunta p
     ON r.RIdPregunta1 = p.IdPregunta

@@ -51,7 +51,7 @@ inside `DALPregunta.ObtenerPreguntas`, where it serves two purposes:
 1. **Filtering** — only questions whose section belongs to the active `ModeloCuestionario` are returned.
 2. **Enriching** — the section name is read from the joined row and assigned to `Pregunta.NombreApartado`.
 
-```csharp DAL/DALPregunta.cs
+```sql DAL/DALPregunta.cs
 SELECT p.*, a.NomApartado
 FROM Pregunta p
 INNER JOIN ApartadoPreguntas a

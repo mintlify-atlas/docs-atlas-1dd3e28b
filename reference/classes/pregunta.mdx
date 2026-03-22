@@ -162,7 +162,7 @@ MySession.Current.TotalPreguntas = pregs.Count;
 
 The DAL query that loads them:
 
-```csharp DAL/DALPregunta.cs
+```sql DAL/DALPregunta.cs
 SELECT p.*, a.NomApartado
 FROM Pregunta p
 INNER JOIN ApartadoPreguntas a
